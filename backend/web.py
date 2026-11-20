@@ -16,10 +16,12 @@ from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
 
 from .activity import collect_draft
+from .chatgpt_plan import ChatGPTPlan
 
 from .limits import ATHENS, UNAVAILABLE, WINDOWS, limit_samples
 from .network_status import configured_monitor
 from .reports import read_reports, report_version, save_report
+from .youtube_growth import VIDEO_ID, YouTubeGrowth, suggestions
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -79,6 +81,22 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         request = urlsplit(self.path)
         path = request.path
+        if path == "/api/youtube/models":
+            self.send_json(self.server.chatgpt_plan.models())
+            return
+        if path in ("/api/youtube/videos", "/api/youtube/retention", "/api/youtube/analysis"):
+            action = path.rsplit("/", 1)[1]
+            video = parse_qs(request.query).get("video", [""])[0]
+            if action == "retention" and not VIDEO_ID.fullmatch(video):
+                self.send_error(400)
+                return
+            try:
+                self.send_json(self.server.youtube_growth.run(action, video))
+            except PermissionError:
+                self.send_json({"status": "reauthorize"})
+            except (OSError, ValueError, KeyError):
+                self.send_json({"status": "unavailable"})
+            return
         if path == "/api/network":
             if self.server.network_monitor is None:
                 self.send_error(503, "Network monitor unavailable")
@@ -289,7 +307,57 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         self.send_json({"deleted": True} if delete else {"device": device})
 
+    def post_youtube_analysis(self, query):
+        if not self.is_same_origin() or IPv4Address(self.client_address[0]) not in SPOTIFY_LAN:
+            self.send_error(403)
+            return
+        opts = parse_qs(query)
+        mode = opts.get("mode", ["chatgpt"])[0]
+        model = opts.get("model", [""])[0]
+        count = opts.get("count", ["15"])[0]
+        if mode not in ("chatgpt", "local") or count not in ("5", "10", "15", "25") or len(model) > 100:
+            self.send_error(400)
+            return
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+            if not 0 <= size <= 12000 or (size and self.headers.get_content_type() != "application/json"):
+                raise ValueError
+            payload = json.loads(self.rfile.read(size)) if size else {}
+            brief = payload.get("brief", "") if isinstance(payload, dict) else None
+            video_format = payload.get("format", "") if isinstance(payload, dict) else None
+            if not isinstance(brief, str) or len(brief) > 2000 or video_format not in ("", "long", "short"):
+                raise ValueError
+            brief = brief.strip()
+        except (ValueError, OSError):
+            self.send_error(400)
+            return
+        try:
+            dashboard = self.server.youtube_growth.run("analysis-input")
+            if dashboard.get("status") != "connected":
+                self.send_json(dashboard)
+                return
+            videos = dashboard["videos"]
+            if video_format:
+                matching = [video for video in videos if video["format"] == video_format]
+                videos = matching + [video for video in videos if video["format"] != video_format]
+            if mode == "local":
+                result, reason = None, None
+            else:
+                result, reason = self.server.chatgpt_plan.suggestions(videos, model, int(count), brief, video_format)
+            if result is None:
+                self.send_json(suggestions(videos) | {"source": "local", "fallback": reason, "description": brief, "tags": []})
+            else:
+                self.send_json(result | {"source": "chatgpt"})
+        except PermissionError:
+            self.send_json({"status": "reauthorize"})
+        except (OSError, ValueError, KeyError):
+            self.send_json({"status": "unavailable"})
+
     def do_POST(self):
+        request = urlsplit(self.path)
+        if request.path == "/api/youtube/analysis":
+            self.post_youtube_analysis(request.query)
+            return
         if self.path == "/api/network/devices":
             self.update_known_device()
             return
@@ -347,7 +415,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header(
             "Content-Security-Policy",
             "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' https://i.scdn.co; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+            "img-src 'self' https://i.scdn.co https://i.ytimg.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
         )
         self.end_headers()
         self.wfile.write(body)
@@ -382,6 +450,8 @@ def main():
 
     with ThreadingHTTPServer((str(args.bind), args.port), DashboardHandler) as server:
         server.network_monitor = configured_monitor(DATA_ROOT, args.bind)
+        server.youtube_growth = YouTubeGrowth(DATA_ROOT)
+        server.chatgpt_plan = ChatGPTPlan(DATA_ROOT)
         print(f"http://{args.bind}:{server.server_port}/", flush=True)
         try:
             server.serve_forever()

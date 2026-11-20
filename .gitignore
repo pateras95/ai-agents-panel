@@ -1,2 +1,4 @@
 /reports/
 __pycache__/
+client_secret*.json
+oauth.json

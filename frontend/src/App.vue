@@ -6,6 +6,7 @@ import StandupDraft from './components/StandupDraft.vue'
 import WeekOverview from './components/WeekOverview.vue'
 import LimitsOverview from './components/LimitsOverview.vue'
 import UbuntuOverview from './components/UbuntuOverview.vue'
+import YouTubeGrowth from './components/YouTubeGrowth.vue'
 import NetworkOverview from './components/NetworkOverview.vue'
 import { useDashboard } from './composables/useDashboard'
 
@@ -14,6 +15,7 @@ const routes = [
   { id: 'standup', label: 'Daily stand-up', heading: 'daily-title' },
   { id: 'usage', label: 'Όρια χρήσης', heading: 'limits-title' },
   { id: 'ubuntu', label: 'Ubuntu', heading: 'ubuntu-title' },
+  { id: 'youtube', label: 'YouTube Growth', heading: 'youtube-title' },
   { id: 'network', label: 'Δίκτυο', heading: 'network-title' },
 ]
 const menus = routes.filter(route => route.id !== 'usage')
@@ -70,6 +72,7 @@ onUnmounted(() => window.removeEventListener('hashchange', route))
             <LimitsOverview v-show="active === 'usage'" :limits="limits" :loading="loading" :error="error" @refresh="refreshLimits" />
             <UbuntuOverview v-show="active === 'ubuntu'" :active="active === 'ubuntu'"
                             :pairing-ticket="pairingTicket" @paired="pairingTicket = ''" />
+            <YouTubeGrowth v-if="active === 'youtube'" />
             <NetworkOverview v-show="active === 'network'" :active="active === 'network'" />
         </div>
       </main>
