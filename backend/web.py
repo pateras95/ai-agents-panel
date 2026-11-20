@@ -18,6 +18,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 from .activity import collect_draft
 
 from .limits import ATHENS, UNAVAILABLE, WINDOWS, limit_samples
+from .network_status import configured_monitor
 from .reports import read_reports, report_version, save_report
 
 
@@ -78,6 +79,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         request = urlsplit(self.path)
         path = request.path
+        if path == "/api/network":
+            if self.server.network_monitor is None:
+                self.send_error(503, "Network monitor unavailable")
+                return
+            self.send_json(self.server.network_monitor.snapshot())
+            return
         if path in ("/api/week", "/api/ubuntu"):
             if not COLLECTOR_URL:
                 self.send_error(503, "Ubuntu collector unavailable")
@@ -179,6 +186,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_content(body, content_type, asset=path.startswith("/assets/"))
 
     def do_DELETE(self):
+        if self.path == "/api/network/devices":
+            self.update_known_device(delete=True)
+            return
         if self.path != "/api/reports":
             self.send_error(404)
             return
@@ -248,7 +258,41 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except (OSError, ValueError):
             self.send_error(503)
 
+    def update_known_device(self, *, delete=False):
+        monitor = self.server.network_monitor
+        if monitor is None:
+            self.send_error(503)
+            return
+        if not self.is_same_origin() or IPv4Address(self.client_address[0]) not in monitor.lan:
+            self.send_error(403)
+            return
+        if self.headers.get_content_type() != "application/json":
+            self.send_error(415)
+            return
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+            if not 0 < size <= 512:
+                raise ValueError
+            payload = json.loads(self.rfile.read(size))
+            fields = ("ip",) if delete else ("ip", "name", "kind")
+            if not isinstance(payload, dict) or any(not isinstance(payload.get(key), str) for key in fields):
+                raise ValueError
+            if delete:
+                monitor.delete(payload["ip"])
+            else:
+                device = monitor.save(payload)
+        except (TypeError, ValueError, KeyError):
+            self.send_error(400, "Invalid known device")
+            return
+        except OSError:
+            self.send_error(503)
+            return
+        self.send_json({"deleted": True} if delete else {"device": device})
+
     def do_POST(self):
+        if self.path == "/api/network/devices":
+            self.update_known_device()
+            return
         if self.path in ("/api/spotify", "/api/spotify/pair"):
             self.post_spotify()
             return
@@ -337,6 +381,7 @@ def main():
     REPORTS_DIRECTORY.mkdir(parents=True, mode=0o700, exist_ok=True)
 
     with ThreadingHTTPServer((str(args.bind), args.port), DashboardHandler) as server:
+        server.network_monitor = configured_monitor(DATA_ROOT, args.bind)
         print(f"http://{args.bind}:{server.server_port}/", flush=True)
         try:
             server.serve_forever()
