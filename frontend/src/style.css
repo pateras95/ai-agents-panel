@@ -21,7 +21,7 @@
 .dashboard-content, .dashboard-content section { min-width: 0; }
 .masthead { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: clamp(1rem, 2.8vw, 2.4rem); }
 .wordmark { font-size: clamp(1.5rem, 3.8vw, 3.3rem); font-weight: 780; letter-spacing: .075em; line-height: 1.15; }
-.wordmark span { font-weight: 450; letter-spacing: .035em; }
+.wordmark span { color: var(--accent); font-weight: 450; letter-spacing: .035em; }
 .menu-toggle.v-btn { min-width: 48px; min-height: 48px; padding: .5rem; }
 .hamburger { display: grid; gap: 5px; width: clamp(25px, 3.2vw, 40px); }
 .hamburger i { display: block; height: 3px; border-radius: 3px; background: currentColor; }

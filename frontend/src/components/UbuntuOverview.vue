@@ -177,7 +177,7 @@ async function command(action, value) {
 <template>
   <section class="ubuntu-page" aria-labelledby="ubuntu-title">
     <header class="view-heading">
-      <h2 id="ubuntu-title" tabindex="-1">Ubuntu</h2>
+      <h2 id="ubuntu-title" tabindex="-1">Σύστημα</h2>
       <p v-if="stale" class="notice" role="status">Η ενημέρωση διακόπηκε προσωρινά.</p>
     </header>
 

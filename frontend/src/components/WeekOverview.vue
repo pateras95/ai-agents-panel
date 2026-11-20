@@ -101,7 +101,7 @@ function pullRequests(project) {
 <template>
   <section class="week-overview" aria-labelledby="week-title">
     <header class="view-heading">
-      <div><h2 id="week-title" tabindex="-1">Εβδομάδα</h2><p class="muted">Δραστηριότητα εταιρικών projects · Ώρα Αθήνας</p></div>
+      <div><h2 id="week-title" tabindex="-1">Εργασίες Εβδομάδας</h2><p class="muted">Δραστηριότητα εταιρικών projects · Ώρα Αθήνας</p></div>
       <v-btn variant="tonal" :loading="loading" @click="refresh">Ανανέωση</v-btn>
     </header>
     <WeekStrip :day="day" :today="today" :approved="approved" :pending="pending"

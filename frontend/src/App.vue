@@ -11,10 +11,10 @@ import NetworkOverview from './components/NetworkOverview.vue'
 import { useDashboard } from './composables/useDashboard'
 
 const routes = [
-  { id: 'week', label: 'Εβδομάδα', heading: 'week-title' },
+  { id: 'week', label: 'Εργασίες Εβδομάδας', heading: 'week-title' },
   { id: 'standup', label: 'Daily stand-up', heading: 'daily-title' },
   { id: 'usage', label: 'Όρια χρήσης', heading: 'limits-title' },
-  { id: 'ubuntu', label: 'Ubuntu', heading: 'ubuntu-title' },
+  { id: 'ubuntu', label: 'Σύστημα', heading: 'ubuntu-title' },
   { id: 'youtube', label: 'YouTube Growth', heading: 'youtube-title' },
   { id: 'network', label: 'Δίκτυο', heading: 'network-title' },
 ]
