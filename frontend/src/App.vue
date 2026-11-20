@@ -1,82 +1,76 @@
 <script setup>
-import UsageCard from './components/UsageCard.vue'
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import UsageBar from './components/UsageBar.vue'
 import AppNavigation from './components/AppNavigation.vue'
 import StandupDraft from './components/StandupDraft.vue'
+import WeekOverview from './components/WeekOverview.vue'
+import LimitsOverview from './components/LimitsOverview.vue'
+import UbuntuOverview from './components/UbuntuOverview.vue'
+import { useDashboard } from './composables/useDashboard'
 
-const menus = [
-  { id: 'usage', label: 'Όρια χρήσης', heading: 'usage-title' },
+const routes = [
+  { id: 'week', label: 'Εβδομάδα', heading: 'week-title' },
   { id: 'standup', label: 'Daily stand-up', heading: 'daily-title' },
+  { id: 'usage', label: 'Όρια χρήσης', heading: 'limits-title' },
+  { id: 'ubuntu', label: 'Ubuntu', heading: 'ubuntu-title' },
 ]
-const active = ref('usage')
-function readRoute() {
-  active.value = menus.find(item => '#' + item.id === window.location.hash)?.id ?? menus[0].id
+const menus = routes.filter(route => route.id !== 'usage')
+const active = ref('week')
+const pairingTicket = ref('')
+function readPairingLink() {
+  const ticket = new URLSearchParams(window.location.hash.slice(1)).get('spotify-pair')
+  if (!ticket) return
+  history.replaceState(null, '', '#ubuntu')
+  pairingTicket.value = ticket
+}
+readPairingLink()
+const standupRequest = ref(null)
+const { limits, loading, error, refreshLimits, reports, reportError, refreshReports } = useDashboard()
+const dockHeight = ref(100)
+
+function route() {
+  readPairingLink()
+  active.value = routes.find(menu => '#' + menu.id === window.location.hash)?.id ?? 'week'
 }
 async function navigate(id) {
   window.location.hash = id
-  readRoute()
+  route()
   await nextTick()
-  document.getElementById(menus.find(item => item.id === id).heading)?.focus()
+  document.getElementById(routes.find(menu => menu.id === id)?.heading)?.focus()
 }
-readRoute()
-onMounted(() => window.addEventListener('hashchange', readRoute))
-onUnmounted(() => window.removeEventListener('hashchange', readRoute))
-import { useDashboard } from './composables/useDashboard'
-
-const { dashboard, loading, error, refresh } = useDashboard()
+function openStandup(request) {
+  void navigate('standup')
+  standupRequest.value = request
+}
+function reportChanged() {
+  void refreshReports(true)
+}
+route()
+onMounted(() => window.addEventListener('hashchange', route))
+onUnmounted(() => window.removeEventListener('hashchange', route))
 </script>
 
 <template>
-  <v-app>
+  <v-app :style="{ '--dock-space': dockHeight + 'px' }">
     <v-main tag="div">
-      <main class="shell">
+      <main class="shell shell-with-usage">
         <header class="masthead">
-          <div class="brand">
-            <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
-            <h1>NEXUS <span>AI</span></h1>
-          </div>
-          <AppNavigation mobile :items="menus" :active="active" @navigate="navigate" />
-          <v-btn
-            v-if="active === 'usage'"
-            color="primary"
-            variant="tonal"
-            rounded="lg"
-            :loading="loading"
-            @click="refresh"
-          >
-            <span class="refresh-icon" aria-hidden="true">↻</span>
-            Ανανέωση
-          </v-btn>
+          <h1 class="wordmark">NEXUS <span>AI</span></h1>
+          <AppNavigation :items="menus" :active="active" @navigate="navigate" />
         </header>
 
-        <div class="dashboard-layout">
-        <AppNavigation :items="menus" :active="active" @navigate="navigate" />
         <div class="dashboard-content">
-        <section v-show="active === 'usage'" class="usage" aria-labelledby="usage-title" :aria-busy="loading">
-          <div class="section-head">
-            <h2 id="usage-title" tabindex="-1">Όρια χρήσης</h2>
-            <span class="timezone">Ώρα Αθήνας</span>
-          </div>
-          <p v-if="error" class="notice" role="status">
-            Η ενημέρωση απέτυχε.{{ dashboard ? ' Εμφανίζονται οι τελευταίες διαθέσιμες τιμές.' : ' Πάτησε Ανανέωση για νέα προσπάθεια.' }}
-          </p>
-          <div v-if="dashboard" class="usage-grid">
-            <UsageCard
-              v-for="(limit, index) in dashboard.limits"
-              :key="`${limit.tool}-${limit.window}`"
-              :limit="limit"
-              :index="index"
-            />
-          </div>
-          <div v-else-if="loading" class="usage-grid" aria-label="Φόρτωση ορίων">
-            <div v-for="card in 4" :key="card" class="skeleton"></div>
-          </div>
-        </section>
-
-        <StandupDraft v-show="active === 'standup'" :reports="dashboard?.reports ?? []" @saved="refresh" />
-        </div>
+            <WeekOverview v-show="active === 'week'" :active="active === 'week'" :reports="reports"
+                          @standup="openStandup" />
+            <StandupDraft v-show="active === 'standup'" :active="active === 'standup'"
+                          :request="standupRequest" :reports="reports" :report-error="reportError"
+                          @saved="reportChanged" @deleted="reportChanged" />
+            <LimitsOverview v-show="active === 'usage'" :limits="limits" :loading="loading" :error="error" @refresh="refreshLimits" />
+            <UbuntuOverview v-show="active === 'ubuntu'" :active="active === 'ubuntu'"
+                            :pairing-ticket="pairingTicket" @paired="pairingTicket = ''" />
         </div>
       </main>
     </v-main>
+    <UsageBar :limits="limits" :loading="loading" @open="navigate('usage')" @resize="dockHeight = $event" />
   </v-app>
 </template>

@@ -1,37 +1,28 @@
 <script setup>
-import { nextTick, ref } from 'vue'
+import { ref } from 'vue'
 
-defineProps({ items: Array, active: String, mobile: Boolean })
-defineEmits(['navigate'])
+defineProps({ items: Array, active: String })
+const emit = defineEmits(['navigate'])
 const open = ref(false)
-const trigger = ref(null)
 
-async function close(focus = false) {
+function choose(id) {
   open.value = false
-  if (focus) {
-    await nextTick()
-    trigger.value?.$el.focus()
-  }
+  emit('navigate', id)
 }
 </script>
 
 <template>
-  <aside v-if="!mobile" class="desktop-menu">
-    <nav aria-label="Κύρια πλοήγηση">
-      <a v-for="item in items" :key="item.id" :href="'#' + item.id"
+  <v-menu v-model="open" location="bottom end" :offset="8" :close-on-content-click="false"
+          content-class="navigation-popover">
+    <template #activator="{ props }">
+      <v-btn v-bind="props" class="menu-toggle" variant="text" aria-label="Μενού">
+        <span class="hamburger" aria-hidden="true"><i></i><i></i><i></i></span>
+      </v-btn>
+    </template>
+    <nav class="navigation-links" role="menu" aria-label="Κύρια πλοήγηση">
+      <a v-for="item in items" :key="item.id" :href="'#' + item.id" role="menuitem"
          :aria-current="active === item.id ? 'page' : undefined"
-         @click.prevent="$emit('navigate', item.id)">{{ item.label }}</a>
+         @click.prevent="choose(item.id)">{{ item.label }}</a>
     </nav>
-  </aside>
-  <div v-else class="mobile-menu" @keydown.esc="close(true)">
-    <v-btn ref="trigger" variant="tonal" color="primary" :aria-expanded="open"
-           aria-controls="mobile-links" @click="open = !open">
-      <span aria-hidden="true" class="menu-mark">☰</span> Μενού
-    </v-btn>
-    <nav v-show="open" id="mobile-links" aria-label="Κύρια πλοήγηση">
-      <a v-for="item in items" :key="item.id" :href="'#' + item.id"
-         :aria-current="active === item.id ? 'page' : undefined"
-         @click.prevent="$emit('navigate', item.id); close()">{{ item.label }}</a>
-    </nav>
-  </div>
+  </v-menu>
 </template>

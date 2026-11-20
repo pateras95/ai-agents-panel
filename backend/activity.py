@@ -2,7 +2,6 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, time, timedelta
-import json
 import os
 from pathlib import Path
 import re
@@ -32,7 +31,7 @@ def git(repo, *args, okay=(0,)):
     return result.stdout
 
 
-def collect_project(entry, reviewed_summaries, author, start, end):
+def collect_project(entry, author, start, end):
     slug, name = entry
     repo = ROOT / slug
     if repo.resolve() != repo or not (repo / ".git").exists():
@@ -63,27 +62,44 @@ def collect_project(entry, reviewed_summaries, author, start, end):
                            "time": datetime.fromtimestamp(int(found[2]), ATHENS).strftime("%H:%M")})
 
     branches = git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads").splitlines()
-    reviewed = reviewed_summaries.get(slug)
-    if reviewed and all(any(item["sha"].startswith(sha) for item in commits) for sha in reviewed[0]):
-        summary = reviewed[1]
-    else:
-        subjects = list(dict.fromkeys(item["subject"].rstrip(".") for item in commits if not item["merge"]))
-        summary = ", ".join(subjects[:3] or [commits[0]["subject"].rstrip(".")]) + "."
+    summary = summarize(commits)
     return {"name": name, "summary": summary, "commits": commits, "branches": branches,
             "pushes": pushes, "source": "Τοπικό Git history, branches και reflog σε ώρα Αθήνας."}
 
 
-def collect_draft(day, project_root, data_root):
-    try:
-        summaries = json.loads((data_root / "summary-overrides" / f"{day.isoformat()}.json").read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        summaries = {}
+def summarize(commits):
+    subjects = list(dict.fromkeys(item["subject"].rstrip(".") for item in commits if not item["merge"]))
+    topics = (
+        (r"vue\s*3", "μετάβαση σε Vue 3" + (" και Pinia" if "pinia" in " ".join(subjects).lower() else "")),
+        (r"users? crud|login|analytics|dashboard", "βελτιώσεις στη διαχείριση χρηστών, στη σύνδεση και στα dashboards"),
+        (r"90 days.*csv", "όριο 90 ημερών στην εξαγωγή CSV"),
+        (r"jenkins", "ενημέρωση του Jenkins build"),
+        (r"node.*version|version.*node", "ενημέρωση της έκδοσης Node.js"),
+    )
+    combined = "\n".join(subjects).lower()
+    matched = [label for pattern, label in topics if re.search(pattern, combined)]
+    if matched == ["ενημέρωση της έκδοσης Node.js"] and len(subjects) == 1:
+        return "Ενημέρωσα την έκδοση Node.js."
+    if len(subjects) == 1:
+        if re.search(r"fix.*affinity", combined):
+            return "Διόρθωσα τη ρύθμιση affinity."
+        if all(word in combined for word in ("demo", "jenkins", "background")):
+            return "Πρόσθεσα περιβάλλον demo, νέο Jenkinsfile και νέο φόντο."
+        return subjects[0] + "."
+    if matched:
+        return "Προχώρησα σε " + ", ".join(matched[:-1] or matched) + (
+            " και " + matched[-1] if len(matched) > 1 else ""
+        ) + "."
+    return ", ".join(subjects[:3] or [commits[0]["subject"].rstrip(".")]) + "."
+
+
+def collect_draft(day, project_root):
     start = datetime.combine(day, time.min, ATHENS).timestamp()
     end = datetime.combine(day + timedelta(days=1), time.min, ATHENS).timestamp()
     author = git(project_root, "var", "GIT_AUTHOR_IDENT").rsplit("<", 1)[-1].split(">", 1)[0].casefold()
     projects, unavailable = [], []
     with ThreadPoolExecutor(max_workers=len(PROJECTS)) as pool:
-        jobs = {pool.submit(collect_project, entry, summaries, author, start, end): entry[1]
+        jobs = {pool.submit(collect_project, entry, author, start, end): entry[1]
                 for entry in PROJECTS.items()}
         for job, name in jobs.items():
             try:

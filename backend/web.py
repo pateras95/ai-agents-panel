@@ -8,14 +8,16 @@ import json
 import re
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from ipaddress import IPv4Address
+from ipaddress import IPv4Address, ip_network
 from pathlib import Path
 from threading import Lock
 from urllib.parse import parse_qs, urlsplit
+from urllib.error import HTTPError
+from urllib.request import ProxyHandler, Request, build_opener
 
 from .activity import collect_draft
 
-from .limits import ATHENS, limit_samples
+from .limits import ATHENS, UNAVAILABLE, WINDOWS, limit_samples
 from .reports import read_reports, report_version, save_report
 
 
@@ -24,18 +26,48 @@ FRONTEND_DIST = PROJECT_ROOT / "frontend" / "dist"
 DATA_ROOT = Path(os.environ.get("NEXUS_DATA_DIR") or Path.home() / ".local" / "share" / "nexus-ai").resolve()
 REPORTS_DIRECTORY = DATA_ROOT / "reports"
 REPORT_LOCK = Lock()
+COLLECTOR_URL = os.environ.get("NEXUS_COLLECTOR_URL", "").rstrip("/")
+STARTED = datetime.now(ATHENS).isoformat(timespec="seconds")
+SPOTIFY_LAN = ip_network(os.environ.get("NEXUS_SPOTIFY_LAN", "192.168.1.0/24"))
+
+
+def collector_data(path, timeout=20, *, body=None, authorization=None):
+    request = Request(COLLECTOR_URL + path, data=body)
+    if authorization:
+        request.add_header("Authorization", authorization)
+    if body is not None:
+        request.add_header("Content-Type", "application/json")
+    with build_opener(ProxyHandler({})).open(request, timeout=timeout) as response:
+        return json.load(response)
+
+
+def dashboard_limits():
+    if not COLLECTOR_URL:
+        return list(limit_samples())
+    try:
+        return collector_data("/limits")
+    except (OSError, ValueError):
+        return [
+            dict(tool=tool, window=window, remaining=UNAVAILABLE, reset=UNAVAILABLE, updated=UNAVAILABLE)
+            for tool in ("Claude Code", "Codex") for window, _, _ in WINDOWS
+        ]
 ASSET_PATH = re.compile(r"/assets/[a-zA-Z0-9_-]+\.(?:js|css)")
 
 
-def dashboard_data():
-    return {
-        "limits": list(limit_samples()),
-        "reports": [
-            {"date": day.isoformat(),
-             "sections": [{"label": label, "items": items} for label, items in sections]}
+def report_history():
+    with REPORT_LOCK:
+        return [
+            {
+                "date": day.isoformat(),
+                "version": report_version(REPORTS_DIRECTORY, day),
+                "sections": [{"label": label, "items": items} for label, items in sections],
+            }
             for day, sections in read_reports(REPORTS_DIRECTORY)
-        ],
-    }
+        ]
+
+
+def dashboard_data():
+    return {"limits": dashboard_limits(), "reports": report_history()}
 
 
 class DashboardHandler(BaseHTTPRequestHandler):
@@ -46,19 +78,84 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         request = urlsplit(self.path)
         path = request.path
-        if path == "/api/draft":
+        if path in ("/api/week", "/api/ubuntu"):
+            if not COLLECTOR_URL:
+                self.send_error(503, "Ubuntu collector unavailable")
+                return
+            upstream = "/ubuntu"
+            if path == "/api/week":
+                try:
+                    start = report_day(parse_qs(request.query).get("start", [""])[0])
+                    if start.weekday() != 0:
+                        raise ValueError
+                except ValueError:
+                    self.send_error(400, "Invalid week")
+                    return
+                upstream = "/week?start=" + start.isoformat()
+            try:
+                self.send_json(collector_data(upstream, timeout=20))
+            except (OSError, ValueError):
+                self.send_error(503, "Ubuntu collector unavailable")
+            return
+        if path == "/api/status":
+            collector = False
+            if COLLECTOR_URL:
+                try:
+                    collector = collector_data("/health", timeout=2).get("collecting") is True
+                except (OSError, ValueError):
+                    pass
+            self.send_json({
+                "backend": True, "collector": collector, "started": STARTED,
+                "reports": sum(1 for _ in REPORTS_DIRECTORY.glob("????-??-??.json")),
+            })
+            return
+        if path == "/api/scheduled":
+            if not COLLECTOR_URL:
+                self.send_json({"dates": []})
+                return
+            try:
+                dates = collector_data("/scheduled", timeout=3)["dates"]
+            except (OSError, ValueError, KeyError):
+                self.send_error(503)
+                return
+            with REPORT_LOCK:
+                pending = [day for day in dates
+                           if report_version(REPORTS_DIRECTORY, day) is None
+                           and not reviewed_path(day).exists()]
+            self.send_json({"dates": pending})
+            return
+        if path in ("/api/draft", "/api/scheduled/draft"):
             try:
                 day = report_day(parse_qs(request.query).get("date", [""])[0])
             except ValueError:
                 self.send_error(400, "Invalid date")
                 return
+            scheduled = path == "/api/scheduled/draft"
+            if scheduled and (not COLLECTOR_URL
+                              or report_version(REPORTS_DIRECTORY, day) is not None
+                              or reviewed_path(day).exists()):
+                self.send_error(404)
+                return
             try:
-                draft = collect_draft(day, PROJECT_ROOT, DATA_ROOT)
+                upstream = "/scheduled/draft" if scheduled else "/draft"
+                draft = (
+                    collector_data(upstream + "?date=" + day.isoformat())
+                    if COLLECTOR_URL else collect_draft(day, PROJECT_ROOT)
+                )
+            except HTTPError as error:
+                self.send_error(404 if error.code == 404 else 503, "Draft unavailable")
+                return
             except (OSError, RuntimeError, subprocess.TimeoutExpired, ValueError):
                 self.send_error(503, "Git unavailable")
                 return
             draft["version"] = report_version(REPORTS_DIRECTORY, day)
             self.send_json(draft)
+            return
+        if path == "/api/reports":
+            self.send_json({"reports": report_history()})
+            return
+        if path == "/api/limits":
+            self.send_json({"limits": dashboard_limits()})
             return
         if path == "/api/dashboard":
             self.send_json(dashboard_data())
@@ -81,12 +178,84 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         self.send_content(body, content_type, asset=path.startswith("/assets/"))
 
-    def do_POST(self):
+    def do_DELETE(self):
         if self.path != "/api/reports":
             self.send_error(404)
             return
+        if not self.is_same_origin():
+            self.send_error(403)
+            return
+        if self.headers.get_content_type() != "application/json":
+            self.send_error(415)
+            return
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+            if not 0 < size <= 512:
+                raise ValueError
+            payload = json.loads(self.rfile.read(size))
+            day = report_day(payload["date"])
+            version = payload["version"]
+            if payload.get("approved") is not True or not isinstance(version, str):
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            self.send_error(400, "Invalid deletion")
+            return
+        with REPORT_LOCK:
+            current = report_version(REPORTS_DIRECTORY, day)
+            if current is None:
+                self.send_error(404, "Report not found")
+                return
+            if current != version:
+                self.send_error(409, "Report changed")
+                return
+            reviewed_path(day).parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            reviewed_path(day).touch()
+            (REPORTS_DIRECTORY / f"{day}.json").unlink()
+        self.send_json({"date": day.isoformat()})
+
+    def is_same_origin(self):
         host, port = self.server.server_address
-        if self.headers.get("Origin") != f"http://{host}:{port}":
+        return self.headers.get("Origin") == f"http://{host}:{port}"
+
+    def post_spotify(self):
+        if not self.is_same_origin() or IPv4Address(self.client_address[0]) not in SPOTIFY_LAN:
+            self.send_error(403)
+            return
+        if self.headers.get_content_type() != "application/json":
+            self.send_error(415)
+            return
+        authorization = self.headers.get("Authorization")
+        pairing = self.path == "/api/spotify/pair"
+        if not pairing and (not authorization or len(authorization) > 100):
+            self.send_error(401)
+            return
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+            if not 0 < size <= 512:
+                raise ValueError
+        except ValueError:
+            self.send_error(400)
+            return
+        if not COLLECTOR_URL:
+            self.send_error(503)
+            return
+        try:
+            upstream = "/spotify/pair" if pairing else "/spotify"
+            self.send_json(collector_data(upstream, timeout=12, body=self.rfile.read(size),
+                                          authorization=None if pairing else authorization))
+        except HTTPError as error:
+            self.send_error(error.code if error.code in (400, 401, 409, 410) else 503)
+        except (OSError, ValueError):
+            self.send_error(503)
+
+    def do_POST(self):
+        if self.path in ("/api/spotify", "/api/spotify/pair"):
+            self.post_spotify()
+            return
+        if self.path != "/api/reports":
+            self.send_error(404)
+            return
+        if not self.is_same_origin():
             self.send_error(403)
             return
         if self.headers.get_content_type() != "application/json":
@@ -134,10 +303,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header(
             "Content-Security-Policy",
             "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
+            "img-src 'self' https://i.scdn.co; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'",
         )
         self.end_headers()
         self.wfile.write(body)
+
+
+def reviewed_path(day):
+    return DATA_ROOT / "reviewed" / f"{day}.done"
 
 
 def report_day(value):
