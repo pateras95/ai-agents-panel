@@ -27,6 +27,22 @@ All screenshots come from the demo mode with **synthetic data** (see [Demo mode]
 - **YouTube Growth.** Up to 50 recent public videos with 30-day metrics, retention and an analysis assistant for the next upload.
 - **Night dimming** from 23:00 to 07:00.
 
+### Dual boot: Windows
+
+When the panel opens, a menu asks **"Which system are you on?"** (Ubuntu or Windows) and highlights the system that has a connected agent. On Windows the panel shows **System, Tools, YouTube and Network**. The button at the bottom of the left rail switches system.
+
+Windows needs no Python, ADB or coding agent. A **self-contained zip** (embedded Python and libraries, about 24 MB) is served by the tablet itself:
+
+1. On Ubuntu, once: `python3 scripts/build_windows_agent.py`, then `scripts/deploy_lenovo.sh` (the package stays outside Git, in `~/.local/share/nexus-ai/windows-agent/`).
+2. On the tablet, in the chooser, press **"First time on Windows? Install agent"** and **Create link**.
+3. On Windows open the link (same Wi-Fi), download the zip, extract it and double-click `start.bat`. `autostart-on.bat` starts it automatically at every sign-in.
+
+The link is valid for 10 minutes and one download. The zip contains a private connection token for the tablet (the tablet only keeps its hash), so do not share it. The agent sends CPU/RAM/GPU, temperatures and Spotify to the tablet every 2 seconds and finds the tablet by itself when its address changes. CPU/SSD temperatures appear if LibreHardwareMonitor runs with its Remote Web Server (port 8085).
+
+**Tools.** The page shows buttons (Spotify, Chrome, folders, Steam, Epic Games, Discord, Terminal, ...) that open the matching item on Windows. The list lives in `launcher.json` next to the agent and you can add your own. The tablet sends **only the id** of a listed item, never a path or command, and the agent runs only what `launcher.json` lists. Traffic stays on the local network, and commands from the dashboard are accepted only from the same origin.
+
+The Windows side has not been tested on a real Windows machine (the tablet side was tested with a simulated agent). The Ubuntu setup is unchanged.
+
 ## Architecture
 
 ```mermaid

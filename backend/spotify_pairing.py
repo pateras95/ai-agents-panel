@@ -12,7 +12,7 @@ from threading import Lock
 import time
 import webbrowser
 
-from .lenovo_address import dashboard_base
+from .lenovo_address import ADB, dashboard_base
 
 
 STATE = Path(os.environ.get("NEXUS_SPOTIFY_PAIR_STATE")
@@ -107,7 +107,7 @@ def pair_lenovo():
 
     ticket = pairing_link().rsplit("=", 1)[1]
     result = subprocess.run(
-        ["/usr/bin/adb", "-d", "shell", "am", "start", "-n",
+        [ADB, "-d", "shell", "am", "start", "-n",
          "org.nexusai.panel.dashboard/org.nexusai.panel.MainActivity",
          "--es", "nexus_spotify_pair", ticket],
         capture_output=True, text=True, timeout=15)

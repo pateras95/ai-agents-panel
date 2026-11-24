@@ -12,5 +12,12 @@ adb -d push frontend/dist/. "$directory/release/frontend/dist/" >/dev/null
 for file in $(adb -d shell "ls $directory/release/backend/" | tr -d '\r' | grep '\.py$'); do
     [[ -f "backend/$file" ]] && adb -d push "backend/$file" "$directory/release/backend/$file" >/dev/null
 done
+# Modules the tablet did not have before, and the optional Windows agent package (built by build_windows_agent.py).
+for file in windows_agent_hub.py; do adb -d push "backend/$file" "$directory/release/backend/$file" >/dev/null; done
+agent="$HOME/.local/share/nexus-ai/windows-agent/nexus-windows-agent.zip"
+if [[ -f "$agent" ]]; then
+    adb -d shell "mkdir -p $directory/production-data/windows-agent"
+    adb -d push "$agent" "$directory/production-data/windows-agent/nexus-windows-agent.zip" >/dev/null
+fi
 adb -d shell "kill \$(cat $directory/production.pid)"   # the watchdog restarts the server
 echo "Deployed to the Lenovo."

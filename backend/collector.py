@@ -13,7 +13,8 @@ from .lenovo_address import dashboard_base
 from .limits import ATHENS, limit_samples
 from .scheduled import available_days, read_draft
 from .spotify_pairing import device_grant, redeem
-from .ubuntu import spotify, spotify_action, stamp, telemetry
+from .platform_data import OS_NAME, spotify, spotify_action, telemetry
+from .ubuntu import stamp
 from .web import DashboardHandler, PROJECT_ROOT, report_day
 
 
@@ -38,7 +39,7 @@ class CollectorHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         request = urlsplit(self.path)
         if request.path == "/health":
-            DashboardHandler.send_json(self, {"collecting": True})
+            DashboardHandler.send_json(self, {"collecting": True, "os": OS_NAME})
         elif request.path == "/week":
             try:
                 start = report_day(parse_qs(request.query).get("start", [""])[0])
@@ -133,9 +134,13 @@ def main():
             self.end_headers()
 
     with ThreadingHTTPServer(("127.0.0.1", 18769), CollectorHandler) as collector:
-        with ThreadingHTTPServer((args.legacy_bind, 8766), RedirectHandler) as legacy:
+        try:
+            legacy = ThreadingHTTPServer((args.legacy_bind, 8766), RedirectHandler)
+        except OSError:
+            legacy = None  # the redirect address belongs to the Ubuntu network card; skip it elsewhere
+        if legacy is not None:
             Thread(target=legacy.serve_forever, daemon=True).start()
-            collector.serve_forever()
+        collector.serve_forever()
 
 
 if __name__ == "__main__":

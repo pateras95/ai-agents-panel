@@ -11,8 +11,9 @@ const stale = ref(false)
 const loading = ref(false)
 const runningAction = ref(false)
 const bridge = window.NexusDevice // present inside the Android app, which keeps the grant across address changes
-const controlKey = ref(localStorage.getItem(DEVICE_KEY) || bridge?.load() || '')
-if (controlKey.value) localStorage.setItem(DEVICE_KEY, controlKey.value)
+const windowsMode = (() => { try { return sessionStorage.getItem('nexus-platform') === 'windows' } catch { return false } })()
+const controlKey = ref(localStorage.getItem(DEVICE_KEY) || bridge?.load() || (windowsMode ? 'agent' : ''))
+if (controlKey.value && controlKey.value !== 'agent') localStorage.setItem(DEVICE_KEY, controlKey.value)
 function syncDevice(event) {
   if (event.key === DEVICE_KEY) controlKey.value = event.newValue || ''
 }
@@ -112,7 +113,7 @@ onUnmounted(() => {
 async function send(payload, secret) {
   const response = await fetch('/api/spotify', {
     method: 'POST', cache: 'no-store',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + secret },
+    headers: { 'Content-Type': 'application/json', ...(secret === 'agent' ? {} : { Authorization: 'Bearer ' + secret }) },
     body: JSON.stringify(payload),
   })
   if (response.status === 401) {
@@ -128,7 +129,7 @@ async function send(payload, secret) {
 }
 
 onMounted(async () => {
-  if (!controlKey.value || props.pairingTicket) return
+  if (!controlKey.value || controlKey.value === 'agent' || props.pairingTicket) return
   try {
     await send({ action: 'authorize' }, controlKey.value)
   } catch (error) {

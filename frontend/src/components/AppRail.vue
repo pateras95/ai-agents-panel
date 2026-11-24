@@ -1,6 +1,6 @@
 <script setup>
-defineProps({ items: Array, active: String })
-const emit = defineEmits(['navigate'])
+defineProps({ items: Array, active: String, platform: String })
+const emit = defineEmits(['navigate', 'switch'])
 // Outline icons, 24px grid.
 const icons = {
   home: ['M3 11l9-8 9 8', 'M5 10v10h5v-6h4v6h5V10'],
@@ -8,6 +8,7 @@ const icons = {
   daily: ['M9 6h11', 'M9 12h11', 'M9 18h11', 'M4 6l1 1 2-2', 'M4 12l1 1 2-2', 'M4 18l1 1 2-2'],
   system: ['M7 7h10v10H7z', 'M9.5 3v2.5', 'M14.5 3v2.5', 'M9.5 18.5V21', 'M14.5 18.5V21', 'M3 9.5h2.5', 'M3 14.5h2.5', 'M18.5 9.5H21', 'M18.5 14.5H21'],
   youtube: ['M3 8a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z', 'M10 9l5 3-5 3z'],
+  tools: ['M4 4h6v6H4z', 'M14 4h6v6h-6z', 'M4 14h6v6H4z', 'M14 14h6v6h-6z'],
   network: ['M12 20h.01', 'M8.5 16.4a5 5 0 0 1 7 0', 'M5.5 13a9 9 0 0 1 13 0', 'M2.5 9.5a13 13 0 0 1 19 0'],
 }
 </script>
@@ -23,6 +24,12 @@ const icons = {
         <path v-for="(d, index) in icons[item.icon]" :key="index" :d="d" />
       </svg>
       <span>{{ item.short }}</span>
+    </button>
+    <button type="button" class="rail-item rail-switch" :aria-label="'Αλλαγή συστήματος, τώρα: ' + (platform === 'windows' ? 'Windows' : 'Ubuntu')" @click="emit('switch')">
+      <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 8h13l-3-3M20 16H7l3 3" />
+      </svg>
+      <span>{{ platform === 'windows' ? 'Windows' : 'Ubuntu' }}</span>
     </button>
   </nav>
 </template>

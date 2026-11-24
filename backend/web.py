@@ -21,6 +21,7 @@ from .chatgpt_plan import ChatGPTPlan
 from .limits import ATHENS, UNAVAILABLE, WINDOWS, limit_samples
 from .network_status import configured_monitor
 from .reports import read_reports, report_version, save_report
+from .windows_agent_hub import AgentHub
 from .youtube_growth import VIDEO_ID, YouTubeGrowth, suggestions
 
 
@@ -103,6 +104,15 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 return
             self.send_json(self.server.network_monitor.snapshot())
             return
+        if path == "/api/agent/status":
+            self.send_json(self.server.agent_hub.status())
+            return
+        if path.startswith("/agent-download/"):
+            self.send_agent_package(path.rsplit("/", 1)[1])
+            return
+        if path == "/api/ubuntu" and (agent := self.server.agent_hub.system()) is not None:
+            self.send_json(agent)  # a Windows agent is reporting: this is the system that is running
+            return
         if path in ("/api/week", "/api/ubuntu"):
             if not COLLECTOR_URL:
                 self.send_error(503, "Ubuntu collector unavailable")
@@ -124,13 +134,18 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if path == "/api/status":
             collector = False
+            collector_os = None
             if COLLECTOR_URL:
                 try:
-                    collector = collector_data("/health", timeout=2).get("collecting") is True
+                    health = collector_data("/health", timeout=2)
+                    collector = health.get("collecting") is True
+                    collector_os = health.get("os") if health.get("os") in ("linux", "windows") else None
                 except (OSError, ValueError):
                     pass
+            if self.server.agent_hub.fresh():
+                collector, collector_os = True, "windows"
             self.send_json({
-                "backend": True, "collector": collector, "started": STARTED,
+                "backend": True, "collector": collector, "collectorOs": collector_os, "started": STARTED,
                 "reports": sum(1 for _ in REPORTS_DIRECTORY.glob("????-??-??.json")),
             })
             return
@@ -276,6 +291,104 @@ class DashboardHandler(BaseHTTPRequestHandler):
         except (OSError, ValueError):
             self.send_error(503)
 
+    def read_json(self, limit):
+        if self.headers.get_content_type() != "application/json":
+            self.send_error(415)
+            return None
+        try:
+            size = int(self.headers.get("Content-Length", "0"))
+            if not 0 < size <= limit:
+                raise ValueError
+            payload = json.loads(self.rfile.read(size))
+        except (TypeError, ValueError):
+            self.send_error(400)
+            return None
+        return payload if isinstance(payload, dict) else self.send_error(400)
+
+    def from_lan(self):
+        try:
+            return IPv4Address(self.client_address[0]) in SPOTIFY_LAN
+        except ValueError:
+            return False
+
+    def post_agent(self, path):
+        hub = self.server.agent_hub
+        if not self.from_lan():
+            self.send_error(403)
+            return
+        if path == "/api/agent/report":
+            if not hub.authorized(self.headers.get("Authorization")):
+                self.send_error(401)
+                return
+            payload = self.read_json(700000)
+            if payload is None:
+                return
+            try:
+                self.send_json({"commands": hub.accept(payload)})
+            except ValueError:
+                self.send_error(400)
+            return
+        # The remaining calls come from the dashboard in a browser on the same network.
+        if not self.is_same_origin():
+            self.send_error(403)
+            return
+        if path == "/api/agent/pair":
+            if not hub.has_package:
+                self.send_error(404, "Agent package not installed on the tablet")
+                return
+            self.send_json({"ticket": hub.new_ticket(), "seconds": 600})
+            return
+        if path == "/api/agent/launch":
+            payload = self.read_json(512)
+            if payload is None:
+                return
+            item = payload.get("id")
+            if isinstance(item, str) and hub.enqueue_launch(item):
+                self.send_json({"queued": True})
+            else:
+                self.send_error(409)
+            return
+        self.send_error(404)
+
+    def post_agent_spotify(self):
+        if not self.is_same_origin() or not self.from_lan():
+            self.send_error(403)
+            return
+        payload = self.read_json(512)
+        if payload is None:
+            return
+        hub = self.server.agent_hub
+        if payload == {"action": "authorize"}:
+            self.send_json({"authorized": True})
+        elif hub.enqueue_spotify(payload):
+            data = hub.system()
+            self.send_json({"spotify": data["spotify"] if data else {"state": "unavailable", "actions": []}})
+        else:
+            self.send_error(409)
+
+    def send_agent_package(self, ticket):
+        host, port = self.server.server_address
+        if not self.from_lan() or not re.fullmatch(r"[A-Za-z0-9_-]{6,12}", ticket):
+            self.send_error(404)
+            return
+        archive = self.server.agent_hub.build_download(ticket, f"http://{host}:{port}")
+        if archive is None:
+            self.send_error(404)
+            return
+        try:
+            size = archive.stat().st_size
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", 'attachment; filename="nexus-windows-agent.zip"')
+            self.send_header("Content-Length", str(size))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            with archive.open("rb") as source:
+                while chunk := source.read(65536):
+                    self.wfile.write(chunk)
+        finally:
+            archive.unlink(missing_ok=True)
+
     def update_known_device(self, *, delete=False):
         monitor = self.server.network_monitor
         if monitor is None:
@@ -360,6 +473,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/network/devices":
             self.update_known_device()
+            return
+        if self.path.startswith("/api/agent/"):
+            self.post_agent(self.path)
+            return
+        if self.path == "/api/spotify" and self.server.agent_hub.fresh():
+            self.post_agent_spotify()
             return
         if self.path in ("/api/spotify", "/api/spotify/pair"):
             self.post_spotify()
@@ -452,6 +571,7 @@ def main():
         server.network_monitor = configured_monitor(DATA_ROOT, args.bind)
         server.youtube_growth = YouTubeGrowth(DATA_ROOT)
         server.chatgpt_plan = ChatGPTPlan(DATA_ROOT)
+        server.agent_hub = AgentHub(DATA_ROOT)
         print(f"http://{args.bind}:{server.server_port}/", flush=True)
         try:
             server.serve_forever()

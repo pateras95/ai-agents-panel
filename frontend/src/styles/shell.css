@@ -39,3 +39,21 @@
 
 /* The status bar already names the page, so these in-page titles only cost height. */
 .dl .section-head, .ubuntu-page .view-heading { display: none; }
+
+.rail-switch { margin-top: auto; border: 1px solid var(--rule); }
+.chooser { min-height: 100dvh; display: grid; place-content: center; justify-items: center; gap: 1.6rem; padding: 2rem; text-align: center; }
+.chooser-logo { font-size: 2.2rem; font-weight: 780; letter-spacing: .08em; }
+.chooser-logo span { color: var(--accent); font-weight: 450; }
+.chooser h1 { font-size: 1.7rem; font-weight: 600; }
+.chooser-options { display: flex; gap: 1.2rem; flex-wrap: wrap; justify-content: center; }
+.chooser-card {
+  width: min(22rem, 86vw); min-height: 14rem; padding: 1.4rem; display: grid; justify-items: center; align-content: center; gap: .6rem;
+  border: 1px solid var(--rule); border-radius: 22px; background: var(--card); color: var(--text); font: inherit;
+}
+.chooser-card:hover, .chooser-card:focus-visible { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.chooser-card.is-detected { border-color: color-mix(in srgb, #7cc79a 55%, transparent); background: linear-gradient(160deg, color-mix(in srgb, #7cc79a 10%, transparent), transparent 60%), var(--card); }
+.chooser-card svg { width: 3.4rem; height: 3.4rem; color: var(--accent); }
+.chooser-card strong { font-size: 1.5rem; font-weight: 620; }
+.chooser-card span { color: var(--muted); font-size: 1rem; line-height: 1.4; }
+.chooser-badge { padding: .1rem .8rem; border-radius: 99px; font-size: .8rem; font-weight: 600; color: #7cc79a; background: color-mix(in srgb, #7cc79a 16%, transparent); }
+.chooser-last { color: var(--muted); background: rgba(255,255,255,.07); }

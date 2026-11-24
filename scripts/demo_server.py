@@ -167,7 +167,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/youtube/retention":
             return self.send_json({"points": [[i / 20, max(.05, 1 - i * .045)] for i in range(21)]})
         if path == "/api/status":
-            return self.send_json({"backend": True, "collector": True, "started": datetime.now(TZ).isoformat(), "reports": len(reports())})
+            return self.send_json({"backend": True, "collector": True, "collectorOs": "linux", "started": datetime.now(TZ).isoformat(), "reports": len(reports())})
         file = DIST / "index.html" if path == "/" else DIST / path.lstrip("/")
         if file.is_file() and DIST in file.resolve().parents or file == DIST / "index.html":
             body = file.read_bytes()
