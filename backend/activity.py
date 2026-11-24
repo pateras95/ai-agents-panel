@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, time, timedelta
+import json
 import os
 from pathlib import Path
 import re
@@ -10,18 +11,27 @@ import subprocess
 from .limits import ATHENS
 
 
-PROJECTS = {
-    "ab-kiosk-app": "AB Kiosk App",
-    "ai-assistant-cms": "AI Assistant CMS",
-    "ai-assistant-webchat-widget": "AI Assistant Webchat Widget",
-    "mailer-panel": "Mailer Panel",
-    "transactional-mailer-admin": "Transactional Mailer Admin",
-    # Personal projects on GitHub, approved by the user.
-    "ai-agents-panel": "NEXUS AI",
-    "gaby-portofolio": "Gaby Portfolio",
-}
-PERSONAL = {"ai-agents-panel", "gaby-portofolio"}
-CATEGORIES = {name: "personal" if slug in PERSONAL else "mpass" for slug, name in PROJECTS.items()}
+PROJECTS_FILE = Path(os.environ.get("NEXUS_PROJECTS_FILE")
+                     or Path.home() / ".config/nexus-ai/projects.json")
+
+
+def load_projects():
+    """Approved repositories come from a local file kept outside Git (see docs/projects.example.json).
+
+    Each entry maps a folder name under the repositories root to a display name and a category:
+    "mpass" for company projects (Bitbucket) or "personal" for the user's own (GitHub).
+    """
+    try:
+        entries = json.loads(PROJECTS_FILE.read_text(encoding="utf-8"))["projects"]
+        return {slug: (str(item["name"]), "personal" if item.get("category") == "personal" else "mpass")
+                for slug, item in entries.items() if re.fullmatch(r"[A-Za-z0-9._-]+", slug)}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
+_LOADED = load_projects()
+PROJECTS = {slug: name for slug, (name, _) in _LOADED.items()}
+CATEGORIES = {name: category for name, category in _LOADED.values()}
 ROOT = Path("/var/www/html")
 
 
@@ -152,7 +162,7 @@ def collect_draft(day, project_root, humanized=False):
     start = datetime.combine(day, time.min, ATHENS).timestamp()
     end = datetime.combine(day + timedelta(days=1), time.min, ATHENS).timestamp()
     projects, unavailable = [], []
-    with ThreadPoolExecutor(max_workers=len(PROJECTS)) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, len(PROJECTS))) as pool:
         jobs = {pool.submit(collect_project, entry, start, end): entry[1]
                 for entry in PROJECTS.items()}
         for job, name in jobs.items():

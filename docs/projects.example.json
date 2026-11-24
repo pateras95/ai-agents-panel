@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "shop-backend": {"name": "Shop Backend", "category": "mpass"},
+    "admin-portal": {"name": "Admin Portal", "category": "mpass"},
+    "side-project": {"name": "Side Project", "category": "personal"}
+  }
+}

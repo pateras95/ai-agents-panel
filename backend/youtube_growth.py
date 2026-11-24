@@ -341,10 +341,10 @@ def suggestions(videos):
                 f'Διάμεσο CTR δείγματος {typical:.1f}%.')
     titles = []
     for matches, proposal, pattern in (
-        (lambda title: len(title) <= 55, 'Με δύο τροχούς στο [όνομα pub]', 'τίτλοι έως 55 χαρακτήρες'),
-        (lambda title: '?' in title, 'Αξίζει η διαδρομή για το [όνομα pub];', 'τίτλοι με ερώτηση'),
+        (lambda title: len(title) <= 55, '[Θέμα] σε μία γραμμή', 'τίτλοι έως 55 χαρακτήρες'),
+        (lambda title: '?' in title, 'Αξίζει [το θέμα του βίντεο];', 'τίτλοι με ερώτηση'),
         (lambda title: bool(re.search(r'[|:–—]', title)),
-         '[Όνομα pub] | Η διαδρομή από [αφετηρία]', 'τίτλοι με διαχωριστικό'),
+         '[Θέμα] | [Τοποθεσία ή συγκεκριμένο όφελος]', 'τίτλοι με διαχωριστικό'),
     ):
         matched = [video['ctr'] for video in candidates if matches(video['title'])]
         other = [video['ctr'] for video in candidates if not matches(video['title'])]
@@ -353,10 +353,10 @@ def suggestions(videos):
                            'reason': (f'{pattern.capitalize()} · διάμεσο CTR {median(matched):.1f}% '
                                       f'σε {len(matched)} βίντεο και {median(other):.1f}% στα υπόλοιπα.')})
     if not titles:
-        titles.append({'text': 'Με δύο τροχούς στο [όνομα pub] | [περιοχή]',
-                       'reason': evidence + ' Δοκίμασε διατύπωση με σαφή προορισμό και χρησιμοποίησε το διάμεσο CTR ως αφετηρία.'})
+        titles.append({'text': '[Θέμα] | [Προορισμός ή αποτέλεσμα]',
+                       'reason': evidence + ' Δοκίμασε διατύπωση με σαφές θέμα και χρησιμοποίησε το διάμεσο CTR ως αφετηρία.'})
     thumbnails = [
-        {'text': 'Μηχανή μπροστά, ευανάγνωστη πινακίδα του pub πίσω.',
+        {'text': 'Το κύριο θέμα μπροστά, ευανάγνωστο σημείο ή κείμενο που δείχνει τον προορισμό πίσω.',
          'reason': evidence + ' Δοκιμή για να φαίνεται με μια ματιά ο προορισμός.'},
         {'text': 'Ένα κοντινό από το πιο αναγνωρίσιμο σημείο, με έως τρεις λέξεις.',
          'reason': f'Διάμεσο CTR {typical:.1f}% σε {len(candidates)} βίντεο ως βάση για δοκιμή πιο απλής σύνθεσης.'},
