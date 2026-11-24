@@ -1,18 +1,19 @@
 <script setup>
-import { computed, onUnmounted, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, toRef, watch } from 'vue'
 import ReportActions from './ReportActions.vue'
-import WeekStrip from './WeekStrip.vue'
+import WeekExport from './WeekExport.vue'
 import { formatLine, rowsFromProjects, rowsFromReport } from '../composables/useDayEntry'
 import { groupRows } from '../composables/useCategories'
+import { STATUS_LABELS, athensDay, previousWorkday, useWeek } from '../composables/useWeek'
+import '../styles/week.css'
 import '../styles/daily.css'
 
 const props = defineProps({ reports: { type: Array, required: true }, active: Boolean, reportError: Boolean, request: Object })
 const emit = defineEmits(['saved', 'deleted'])
-const dateParts = new Intl.DateTimeFormat('en-GB', {
-  timeZone: 'Europe/Athens', year: 'numeric', month: '2-digit', day: '2-digit',
-}).formatToParts()
-const today = ['year', 'month', 'day'].map(key => dateParts.find(part => part.type === key).value).join('-')
-const day = ref(today)
+const week = useWeek(toRef(props, 'active'), toRef(props, 'reports'))
+const today = athensDay()
+const weekend = [0, 6].includes(new Date(today + 'T00:00:00Z').getUTCDay())
+const day = ref(weekend ? previousWorkday(today) : today)
 const rows = ref([])
 const next = ref('')
 const blockers = ref('')
@@ -24,12 +25,14 @@ const error = ref('')
 const message = ref('')
 const scheduledDates = ref([])
 const scheduleUnavailable = ref(false)
+const exporting = ref(false)
 let schedulePoll
 let loadToken = 0
 
 const lines = text => text.split('\n').map(line => line.trim()).filter(Boolean)
 const approvedDates = computed(() => props.reports.map(report => report.date))
 const pendingDates = computed(() => scheduledDates.value.filter(date => !approvedDates.value.includes(date)))
+const labels = STATUS_LABELS
 const report = computed(() => props.reports.find(item => item.date === day.value))
 const serialize = () => JSON.stringify([rows.value.map(formatLine), lines(next.value), lines(blockers.value)])
 const dirty = computed(() => serialize() !== saved.value)
@@ -96,6 +99,7 @@ async function refreshScheduled() {
 async function selectDay(date) {
   if (saving.value || date === day.value && draft.value) return
   if (dirty.value && !window.confirm('Να αλλάξει η ημέρα χωρίς αποθήκευση των αλλαγών;')) return
+  week.showWeekOf(date)
   day.value = date
   message.value = ''
   await load(date)
@@ -159,6 +163,13 @@ async function save() {
   }
 }
 
+async function changeWeek(offset) {
+  const index = week.days.value.findIndex(item => item.date === day.value)
+  week.step(offset)
+  const target = week.days.value[Math.max(index, 0)]
+  if (target && target.status !== 'future') await selectDay(target.date)
+}
+
 async function reportDeleted(date) {
   emit('deleted', date)
   if (date) {
@@ -169,19 +180,40 @@ async function reportDeleted(date) {
 </script>
 
 <template>
-  <section class="dl" aria-labelledby="daily-title">
-    <div class="section-head">
-      <h2 id="daily-title" tabindex="-1">Daily stand-up</h2>
-      <span class="timezone">Ώρα Αθήνας</span>
-    </div>
-    <WeekStrip :day="day" :today="today" :approved="approvedDates" :pending="pendingDates" :busy="saving"
-               @select="selectDay" />
-    <p v-if="scheduleUnavailable || reportError" class="notice" role="status">
+  <section class="dl" aria-labelledby="week-title">
+    <header class="wk-top">
+      <h2 id="week-title" tabindex="-1">Εβδομάδα</h2>
+      <div class="wk-kpis" aria-label="Σύνοψη εβδομάδας">
+        <span class="wk-kpi" style="--tone:#62bdb0"><b>{{ week.summary.value.days }}/5</b> ημέρες με δουλειά</span>
+        <span class="wk-kpi" style="--tone:#a396d6"><b>{{ week.summary.value.projects }}</b> projects</span>
+        <span class="wk-kpi" style="--tone:#7cc79a"><b>{{ week.summary.value.saved }}/5</b> αποθηκευμένα</span>
+      </div>
+      <div class="wk-nav">
+        <button class="wk-step" type="button" aria-label="Προηγούμενη εβδομάδα" :disabled="saving" @click="changeWeek(-1)">‹</button>
+        <strong>{{ week.range.value }}</strong>
+        <button class="wk-step" type="button" aria-label="Επόμενη εβδομάδα" :disabled="saving || !week.canGoForward.value" @click="changeWeek(1)">›</button>
+        <v-btn variant="tonal" @click="exporting = true">Εξαγωγή εβδομάδας</v-btn>
+      </div>
+    </header>
+    <p v-if="scheduleUnavailable || reportError || week.failed.value" class="notice" role="status">
       Ο συγχρονισμός διακόπηκε προσωρινά. Γίνεται νέα προσπάθεια αυτόματα.
     </p>
     <p v-if="error" class="notice" role="alert">{{ error }}</p>
 
     <div class="dl-layout">
+      <nav class="wk-list" aria-label="Ημέρες της εβδομάδας">
+        <button v-for="item in week.days.value" :key="item.date" type="button" class="wk-item"
+                :class="['wk-' + item.status, { 'wk-selected': item.date === day, 'wk-today': item.today }]"
+                :disabled="item.status === 'future' || saving" :aria-current="item.date === day ? 'date' : undefined"
+                @click="selectDay(item.date)">
+          <span class="wk-item-head">
+            <b>{{ item.weekday }} <small>{{ item.date.slice(8) }}/{{ item.date.slice(5, 7) }}</small></b>
+            <span v-if="labels[item.status]" class="wk-chip">{{ labels[item.status] }}</span>
+          </span>
+          <span class="wk-item-text">{{ item.rows.length ? item.rows.map(row => row.text).join(' · ') : item.status === 'future' ? '' : 'Χωρίς δραστηριότητα' }}</span>
+        </button>
+      </nav>
+
       <section class="dl-card dl-editor" aria-labelledby="selected-day" :aria-busy="loading">
         <header class="dl-head">
           <div>
@@ -194,72 +226,65 @@ async function reportDeleted(date) {
         </header>
         <p v-if="message" class="week-message" role="status">{{ message }}</p>
 
-        <div class="dl-body">
-        <datalist id="dl-projects"><option v-for="name in projectNames" :key="name" :value="name"></option></datalist>
-        <section v-for="group in groups" :key="group.key" class="dl-group" :style="{ '--cat': group.color }">
-         <h4 class="dl-group-title"><span aria-hidden="true"></span>{{ group.label }}<small>{{ group.sub }}</small></h4>
-         <ol class="dl-rows">
-          <li v-for="{ row, index } in group.items" :key="index" class="dl-row">
-            <div class="dl-row-top">
-              <input v-model.trim="row.name" class="dl-name" list="dl-projects" placeholder="Project" aria-label="Όνομα project" maxlength="80">
-              <span class="dl-tools">
-                <button type="button" aria-label="Μετακίνηση πάνω" :disabled="index === 0" @click="move(index, -1)">↑</button>
-                <button type="button" aria-label="Μετακίνηση κάτω" :disabled="index === rows.length - 1" @click="move(index, 1)">↓</button>
-                <button type="button" aria-label="Διαγραφή γραμμής" class="dl-remove" @click="removeRow(index)">✕</button>
-              </span>
-            </div>
-            <textarea v-model="row.text" rows="2" placeholder="Τι πέτυχες; Μία πρόταση με το αποτέλεσμα."
-                      aria-label="Κείμενο γραμμής" maxlength="560"></textarea>
-            <details v-if="evidence(row.name)" class="dl-evidence">
-              <summary>Στοιχεία Git · {{ evidence(row.name).commits.length }} commits</summary>
-              <ul><li v-for="commit in evidence(row.name).commits" :key="commit.sha"><code>{{ commit.sha }}</code> {{ commit.subject }}</li></ul>
-              <p class="muted">Branches: {{ evidence(row.name).branches.join(', ') || 'Μη διαθέσιμο' }}</p>
-              <p v-if="evidence(row.name).pushes.length" class="muted">
-                Ενδείξεις push: {{ evidence(row.name).pushes.map(push => push.time + ' ' + push.branch).join(' · ') }}
-              </p>
-              <p class="muted">{{ evidence(row.name).source }}</p>
-            </details>
-          </li>
-         </ol>
-        </section>
-        <p v-if="!rows.length && !loading" class="muted dl-empty">Δεν βρέθηκε δραστηριότητα. Πρόσθεσε μια γραμμή χειροκίνητα.</p>
-        <v-btn variant="text" class="quiet-button" @click="addRow">+ Προσθήκη γραμμής</v-btn>
-        </div>
-
-        <div class="dl-notes">
-          <label>Επόμενα<textarea v-model="next" rows="2" placeholder="Προαιρετικό"></textarea></label>
-          <label>Εμπόδια<textarea v-model="blockers" rows="2" placeholder="Προαιρετικό"></textarea></label>
-        </div>
-      </section>
-
-      <aside class="dl-side">
-        <section v-if="suggestion.length" class="dl-card dl-suggest" aria-labelledby="suggest-title">
-          <h3 id="suggest-title">Νεότερη πρόταση από commits</h3>
-          <p class="muted">Δεν αλλάζει τίποτα μέχρι να την επιλέξεις και να αποθηκεύσεις.</p>
+        <section v-if="suggestion.length" class="dl-suggest" aria-labelledby="suggest-title">
+          <div class="dl-suggest-head">
+            <h4 id="suggest-title">Νεότερη πρόταση από commits</h4>
+            <v-btn v-if="suggestion.length > 1" size="small" color="primary" variant="tonal" @click="useAllSuggestions">Χρήση όλων</v-btn>
+          </div>
           <ul>
             <li v-for="row in suggestion" :key="row.name + row.text">
-              <strong>{{ row.name }}</strong><p>{{ row.text }}</p>
+              <span><strong>{{ row.name }}</strong> {{ row.text }}</span>
               <v-btn size="small" variant="tonal" @click="useSuggestion(row)">Χρήση</v-btn>
             </li>
           </ul>
-          <v-btn v-if="suggestion.length > 1" size="small" color="primary" variant="tonal" @click="useAllSuggestions">Χρήση όλων</v-btn>
         </section>
-        <section class="dl-card">
-          <h3>Συλλογή</h3>
-          <p v-if="draft?.generatedAt" class="muted">
-            Αυτόματο προσχέδιο · {{ new Date(draft.generatedAt).toLocaleString('el-GR', { timeZone: 'Europe/Athens' }) }}
-          </p>
-          <p v-else-if="draft" class="muted">Από τα τοπικά commits της ημέρας.</p>
-          <p v-if="draft?.unavailable?.length" class="notice">Εκκρεμεί ο έλεγχος για {{ draft.unavailable.join(', ') }}.</p>
-          <v-btn variant="tonal" size="small" :loading="loading" @click="load(day)">Επαναφόρτωση από commits</v-btn>
-        </section>
-        <section v-if="report" class="dl-card">
-          <details class="draft-evidence">
-            <summary>Ενέργειες αναφοράς</summary>
-            <ReportActions :report="report" @deleted="reportDeleted" />
-          </details>
-        </section>
-      </aside>
+
+        <div class="dl-body">
+          <datalist id="dl-projects"><option v-for="name in projectNames" :key="name" :value="name"></option></datalist>
+          <section v-for="group in groups" :key="group.key" class="dl-group" :style="{ '--cat': group.color }">
+            <h4 class="dl-group-title"><span aria-hidden="true"></span>{{ group.label }}<small>{{ group.sub }}</small></h4>
+            <ol class="dl-rows">
+              <li v-for="{ row, index } in group.items" :key="index" class="dl-row">
+                <div class="dl-row-top">
+                  <input v-model.trim="row.name" class="dl-name" list="dl-projects" placeholder="Project" aria-label="Όνομα project" maxlength="80">
+                  <span class="dl-tools">
+                    <button type="button" aria-label="Μετακίνηση πάνω" :disabled="index === 0" @click="move(index, -1)">↑</button>
+                    <button type="button" aria-label="Μετακίνηση κάτω" :disabled="index === rows.length - 1" @click="move(index, 1)">↓</button>
+                    <button type="button" aria-label="Διαγραφή γραμμής" class="dl-remove" @click="removeRow(index)">✕</button>
+                  </span>
+                </div>
+                <textarea v-model="row.text" rows="2" placeholder="Τι πέτυχες; Μία πρόταση με το αποτέλεσμα."
+                          aria-label="Κείμενο γραμμής" maxlength="560"></textarea>
+                <details v-if="evidence(row.name)" class="dl-evidence">
+                  <summary>Στοιχεία Git · {{ evidence(row.name).commits.length }} commits</summary>
+                  <ul><li v-for="commit in evidence(row.name).commits" :key="commit.sha"><code>{{ commit.sha }}</code> {{ commit.subject }}</li></ul>
+                  <p class="muted">Branches: {{ evidence(row.name).branches.join(', ') || 'Μη διαθέσιμο' }}</p>
+                  <p v-if="evidence(row.name).pushes.length" class="muted">
+                    Ενδείξεις push: {{ evidence(row.name).pushes.map(push => push.time + ' ' + push.branch).join(' · ') }}
+                  </p>
+                  <p class="muted">{{ evidence(row.name).source }}</p>
+                </details>
+              </li>
+            </ol>
+          </section>
+          <p v-if="!rows.length && !loading" class="muted dl-empty">Δεν βρέθηκε δραστηριότητα. Πρόσθεσε μια γραμμή χειροκίνητα.</p>
+          <v-btn variant="text" class="quiet-button" @click="addRow">+ Προσθήκη γραμμής</v-btn>
+        </div>
+
+        <details class="dl-notes-wrap" :open="!!(next || blockers)">
+          <summary>Επόμενα, εμπόδια και ενέργειες</summary>
+          <div class="dl-notes">
+            <label>Επόμενα<textarea v-model="next" rows="2" placeholder="Προαιρετικό"></textarea></label>
+            <label>Εμπόδια<textarea v-model="blockers" rows="2" placeholder="Προαιρετικό"></textarea></label>
+          </div>
+          <div class="dl-more">
+            <v-btn variant="tonal" size="small" :loading="loading" @click="load(day)">Επαναφόρτωση από commits</v-btn>
+            <ReportActions v-if="report" :report="report" @deleted="reportDeleted" />
+          </div>
+        </details>
+      </section>
     </div>
+
+    <WeekExport v-model="exporting" :reports="reports" />
   </section>
 </template>
