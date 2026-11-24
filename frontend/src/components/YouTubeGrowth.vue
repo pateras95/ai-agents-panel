@@ -210,7 +210,7 @@ watch(mode, value => { if (value === 'chatgpt' && !catalog.value) void refreshMo
         <label class="yt-brief">
           Τι δείχνει το νέο βίντεο;
           <textarea v-model="brief" rows="4" maxlength="2000" :disabled="analyzing"
-                    placeholder="Π.χ. διαδρομή με τη μηχανή, ποιο pub επισκεφτήκατε και τι ξεχώρισε." />
+                    placeholder="Π.χ. τι δείχνει το βίντεο, πού γυρίστηκε και τι ξεχώρισε." />
           <small class="yt-muted">{{ brief.length }}/2000</small>
         </label>
         <div class="yt-analysis-settings">

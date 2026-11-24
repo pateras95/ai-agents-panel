@@ -1,6 +1,20 @@
 # NEXUS AI
 
-Τοπικό dashboard για εβδομαδιαία δραστηριότητα, stand-up, όρια Claude Code και Codex, μετρήσεις Ubuntu, Spotify, έλεγχο δικτύου και YouTube Growth. Το **Ubuntu συλλέγει** τα δεδομένα εργασίας. Το **Lenovo σερβίρει** το dashboard και κρατά τις εγκεκριμένες αναφορές.
+**Ελληνικά** · [English](README.en.md)
+
+Τοπικό dashboard για tablet που συγκεντρώνει εβδομαδιαία δραστηριότητα και daily stand-up, όρια Claude Code και Codex, μετρήσεις Ubuntu, Spotify, έλεγχο δικτύου και YouTube Growth. Το **Ubuntu συλλέγει** τα δεδομένα εργασίας. Το **Lenovo σερβίρει** το dashboard και κρατά τις εγκεκριμένες αναφορές.
+
+![Αρχική: σημερινή δουλειά, όρια χρήσης, εβδομάδα, σύστημα, Spotify και δίκτυο](docs/images/home.png)
+
+## Στιγμιότυπα
+
+Όλα τα στιγμιότυπα προέρχονται από τη λειτουργία επίδειξης με **συνθετικά δεδομένα** (δες [παρακάτω](#λειτουργία-επίδειξης)). Δεν περιέχουν πραγματικά projects, συσκευές ή λογαριασμούς.
+
+| | |
+|---|---|
+| ![Εβδομάδα και daily](docs/images/week.png)<br>**Εβδομάδα και daily.** Λίστα ημερών και επεξεργαστής, με ομάδες MPASS και Personal. | ![Σύστημα](docs/images/system.png)<br>**Σύστημα.** Δακτύλιοι CPU/GPU/RAM, θερμοκρασίες και Spotify. |
+| ![Όρια χρήσης](docs/images/usage.png)<br>**Όρια χρήσης.** 5ωρο και 7ήμερο για Claude Code και Codex. | ![Δίκτυο](docs/images/network.png)<br>**Δίκτυο.** Αυτόματη ανακάλυψη συσκευών με εικονίδια τύπου. |
+| ![YouTube Growth](docs/images/youtube.png)<br>**YouTube Growth.** Μετρήσεις βίντεο και προετοιμασία επόμενου upload. | |
 
 ## Γρήγορη εκκίνηση
 
@@ -26,6 +40,17 @@ NEXUS_DATA_DIR="$nexus_dev_data" python3 -B -m backend.web --bind 127.0.0.1 --po
 ```
 
 Άνοιξε το `http://127.0.0.1:8767/`. Ο Python server σερβίρει το Vue build από `frontend/dist/`. Μετά από αλλαγές UI ξανατρέξε το build και ανανέωσε τη σελίδα. Ο προσωρινός κατάλογος ξεκινά κενός. Οι λειτουργίες που χρειάζονται τον συλλέκτη Ubuntu ή εξωτερική σύνδεση ενδέχεται να εμφανίζουν «Μη διαθέσιμο», ενώ τα όρια CLI μπορούν να διαβαστούν τοπικά με `python3 -B -m backend.limits`.
+
+### Λειτουργία επίδειξης
+
+Για να δοκιμάσεις το UI χωρίς Git repos, συσκευές ή λογαριασμούς, ο `scripts/demo_server.py` σερβίρει το build με **συνθετικά δεδομένα** και δεν αποθηκεύει τίποτα:
+
+```bash
+npm --prefix frontend run build
+python3 scripts/demo_server.py --port 8790
+```
+
+Άνοιξε το `http://127.0.0.1:8790/`. Με αυτόν έχουν παραχθεί τα στιγμιότυπα του `docs/images/` (παράθυρο 1920×1200, όπως το tablet).
 
 ## Πώς λειτουργεί
 
@@ -86,33 +111,13 @@ journalctl --user -u nexus-ubuntu-collector.service -u nexus-lenovo-pilot.servic
 
 ### Ενημέρωση της εγκατεστημένης έκδοσης
 
-Από τη ρίζα του checkout στο Ubuntu:
+Με το tablet στο USB, από τη ρίζα του checkout στο Ubuntu:
 
 ```bash
-(
-  set -euo pipefail
-  : "${LENOVO_IP:?Όρισε τη διεύθυνση Wi-Fi του Lenovo}"
-  remote=$(cat "$HOME/.local/state/nexus-lenovo-pilot/remote")
-  [[ "$remote" =~ ^/data/local/tmp/nexus-actual\.[A-Za-z0-9]+$ ]]
-  adb -d shell "test -f '$remote/release/launch.py' && test -d '$remote/production-data'"
-
-  npm --prefix frontend ci
-  npm --prefix frontend run build
-  adb -d push frontend/dist/assets/. "$remote/release/frontend/dist/assets/"
-  adb -d push backend/*.py "$remote/release/backend/"
-  adb -d push frontend/dist/index.html "$remote/release/frontend/dist/index.html"
-
-  # Ο watchdog επανεκκινεί τον Python server, φορτώνοντας τον νέο κώδικα.
-  adb -d shell "pid=\$(cat '$remote/production.pid') &&
-    test -n \"\$pid\" &&
-    tr '\\000' '\\n' </proc/\"\$pid\"/cmdline | grep -Fxq '$remote/release/launch.py' &&
-    kill -TERM \"\$pid\""
-  curl -fsS --retry 6 --retry-connrefused --retry-delay 2 --max-time 5 \
-    "http://${LENOVO_IP:?Όρισε τη διεύθυνση Wi-Fi του Lenovo}:18767/api/status"
-)
+scripts/deploy_lenovo.sh
 ```
 
-Η ενημέρωση γράφει μόνο στο `release/`. Για αλλαγή αποκλειστικά στο UI αρκούν το build και τα δύο `adb push` του frontend. Τα assets αντιγράφονται πρώτα και το `index.html` τελευταίο. Για αλλαγή στο ίδιο το `lenovo_watchdog.sh` απαιτείται ξεχωριστή επανεκκίνηση του watchdog, επειδή ο ήδη ενεργός επόπτης Android συνεχίζει να εκτελεί την παλιά έκδοση.
+Το script κάνει build του frontend, αντιγράφει στο `release/` του tablet τα assets και τα Python modules που υπάρχουν ήδη εκεί, και τερματίζει τον server ώστε ο watchdog να τον ξαναξεκινήσει με τον νέο κώδικα. Με `--no-build` παραλείπεται το build. Η ενημέρωση γράφει μόνο στο `release/`. Για αλλαγή στο ίδιο το `lenovo_watchdog.sh` απαιτείται ξεχωριστή επανεκκίνηση του watchdog, επειδή ο ήδη ενεργός επόπτης Android συνεχίζει να εκτελεί την παλιά έκδοση. Η διεύθυνση του tablet δεν είναι πλέον σταθερή: ο watchdog βρίσκει την τρέχουσα IP Wi-Fi, ενεργοποιεί το Wi-Fi αν είναι κλειστό και ξαναξεκινά τον server όταν αλλάξει η IP. Οι εφαρμογές Android βρίσκουν μόνες τους την IP τους και ξαναδοκιμάζουν αυτόματα.
 
 ### Επαναφορά υπηρεσιών ή εγκατάσταση σε νέο Ubuntu
 
@@ -158,14 +163,18 @@ Path(os.environ["PILOT_PID_FILE"]).write_text(str(os.getpid()))
 main()
 ```
 
-Οι εφαρμογές **NEXUS Backend** και **NEXUS Dashboard** στο Lenovo είναι Android wrappers του υπάρχοντος server. Για νέο APK, το `frontend/android/build.sh <φάκελος-εξόδου>` χρησιμοποιεί `JAVA_HOME`, `ANDROID_HOME`, Android SDK 34, Build Tools 34.0.0 και τις τοπικές ρυθμίσεις υπογραφής `NEXUS_ANDROID_KEYSTORE` και `NEXUS_ANDROID_KEYSTORE_PASSWORD`.
+Οι εφαρμογές **NEXUS Backend** και **NEXUS Dashboard** στο Lenovo είναι Android wrappers του υπάρχοντος server (έκδοση 1.3). Για νέο APK, το `frontend/android/build.sh <φάκελος-εξόδου>` χρησιμοποιεί `JAVA_HOME`, `ANDROID_HOME`, Android SDK 34, Build Tools 34.0.0 και τις τοπικές ρυθμίσεις υπογραφής `NEXUS_ANDROID_KEYSTORE` και `NEXUS_ANDROID_KEYSTORE_PASSWORD`.
 
 ## Χρήση και συνδέσεις
 
-- **Εργασίες Εβδομάδας / Daily stand-up.** Οι επιτρεπόμενες πηγές Git ορίζονται στο `backend/activity.py`. Ο timer παράγει προσχέδιο Δευτέρα έως Παρασκευή στις 18:00 Αθήνας. Άνοιξέ το από **Προς έγκριση** ή από την ημέρα της εβδομάδας. Η τελική αναφορά αποθηκεύεται στο Lenovo αφού την εγκρίνεις. Για διαγραφή, άνοιξε **Λεπτομέρειες ημέρας → Ενέργειες αναφοράς → Διαγραφή αναφοράς** και επιβεβαίωσε.
-- **Όρια χρήσης.** Η κάτω λωρίδα δείχνει 5ωρο και 7ήμερο για Claude Code και Codex. Πάτησέ τη για επαναφορά και τελευταία ενημέρωση σε ώρα Αθήνας.
-- **Σύστημα.** Ο συλλέκτης Ubuntu παρέχει μετρήσεις και Spotify μέσω MPRIS. Άνοιξε **NEXUS Spotify QR** στο Ubuntu για σύζευξη συσκευής. Το QR ισχύει πέντε λεπτά για μία σύζευξη. Ανάκληση από **Σύστημα → Αποσύνδεση συσκευής**.
-- **Δίκτυο.** Το Lenovo ελέγχει χωριστά router, Internet και τις IP που καταχωρίζεις. Η ένδειξη «Δεν απαντά» σημαίνει ότι ο έλεγχος δεν εντόπισε τη συσκευή.
+Η πλοήγηση γίνεται από την αριστερή μπάρα ή με swipe ανάμεσα στις σελίδες. Η πάνω μπάρα δείχνει πάντα τον τίτλο, τα τέσσερα όρια και το ρολόι. Από 23:00 έως 07:00 η οθόνη θαμπώνει μόνη της.
+
+- **Αρχική.** Με μια ματιά: η κάρτα **Για το daily** (η δουλειά της προηγούμενης εργάσιμης ημέρας, που λες στο πρωινό daily), η σημερινή δραστηριότητα, τα όρια, η εβδομάδα, το σύστημα, το Spotify και το δίκτυο. Οι δύο πρώτες κάρτες ανοίγουν σε popup με το πλήρες κείμενο. Εμφανίζονται ειδοποιήσεις όταν ένα όριο πέσει κάτω από 15% ή χαθεί το router/Internet.
+- **Εβδομάδα και daily.** Μία σελίδα: λίστα ημερών αριστερά, επεξεργαστής της ημέρας δεξιά. Οι γραμμές ομαδοποιούνται σε **MPASS** (Bitbucket) και **Personal** (GitHub). Μπορείς να αλλάξεις, να προσθέσεις, να μετακινήσεις ή να διαγράψεις γραμμές και αποθηκεύεις με ένα κλικ. Αν τα commits προχωρήσουν, προτείνεται νεότερο κείμενο που δεν εφαρμόζεται αν δεν το επιλέξεις. Το **Εξαγωγή εβδομάδας** ανοίγει πλήρη οθόνη με τη δουλειά της προηγούμενης (ή της τρέχουσας) εβδομάδας ανά project, για αντιγραφή σε email ή Slack, με διακόπτη για τα προσωπικά projects.
+- **Διατύπωση stand-up.** Οι προτάσεις παράγονται πρώτα από κανόνες στα ελληνικά και, με την ήδη συνδεδεμένη συνδρομή ChatGPT, αναδιατυπώνονται φυσικά μέσω του Codex CLI. Στέλνονται μόνο το όνομα του project και οι τίτλοι των commits, χωρίς diffs, κώδικα ή διαδρομές. Αν αποτύχει, μένει η τοπική διατύπωση.
+- **Όρια χρήσης.** Το Claude Code διαβάζεται από το status line (πολιτική MPASS) και το Codex από το App Server. Πάτησε τα όρια στην πάνω μπάρα για επαναφορά και τελευταία ενημέρωση σε ώρα Αθήνας.
+- **Σύστημα.** Ο συλλέκτης Ubuntu παρέχει μετρήσεις και Spotify μέσω MPRIS. Η σύζευξη του tablet γίνεται χωρίς QR με `python3 -m backend.spotify_pairing --lenovo` (το token μένει στην εφαρμογή και επιβιώνει σε αλλαγές IP). Για άλλες συσκευές χρησιμοποίησε το QR (`python3 -m backend.spotify_pairing`), που ισχύει πέντε λεπτά. Ανάκληση από **Σύστημα → Χειρισμός → Αποσύνδεση συσκευής**.
+- **Δίκτυο.** Το Lenovo ελέγχει router και Internet και **ανακαλύπτει αυτόματα** τις συσκευές του υποδικτύου (ping και ARP, ονόματα μέσω reverse DNS ή mDNS). Ο τύπος εκτιμάται από το όνομα (router, κάμερα, τηλέφωνο, τηλεόραση, ηχείο, κ.ά.) και μπορείς να δώσεις δικό σου όνομα ή τύπο. Αποθηκεύονται μόνο MAC, IP, όνομα και ώρα τελευταίας εμφάνισης, εκτός Git. «Δεν απαντά» σημαίνει ότι ο έλεγχος δεν εντόπισε τη συσκευή (τηλέφωνα σε αναστολή μπορεί να φαίνονται έτσι).
 
 ### YouTube Growth
 
