@@ -10,9 +10,9 @@ export default createVuetify({
       nexus: {
         dark: true,
         colors: {
-          background: '#111111',
-          surface: '#1b1b1b',
-          primary: '#ffad32',
+          background: '#06080b',
+          surface: '#0f1217',
+          primary: '#e3a649',
           secondary: '#c3c3c3',
           error: '#ff8b83',
         },

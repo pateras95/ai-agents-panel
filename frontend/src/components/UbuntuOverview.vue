@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import QuotaRing from './QuotaRing.vue'
 
 const props = defineProps({ active: Boolean, pairingTicket: String })
 const emit = defineEmits(['paired'])
@@ -9,7 +10,9 @@ const snapshot = ref(null)
 const stale = ref(false)
 const loading = ref(false)
 const runningAction = ref(false)
-const controlKey = ref(localStorage.getItem(DEVICE_KEY) || '')
+const bridge = window.NexusDevice // present inside the Android app, which keeps the grant across address changes
+const controlKey = ref(localStorage.getItem(DEVICE_KEY) || bridge?.load() || '')
+if (controlKey.value) localStorage.setItem(DEVICE_KEY, controlKey.value)
 function syncDevice(event) {
   if (event.key === DEVICE_KEY) controlKey.value = event.newValue || ''
 }
@@ -31,6 +34,21 @@ const temperatures = computed(() => [
   { label: 'CPU', reading: sensors.value.find(sensor => sensor.sensor.startsWith('Package id')) },
   { label: 'GPU', reading: sensors.value.find(sensor => sensor.sensor === 'GPU') },
 ])
+const gauges = computed(() => [
+  { label: 'CPU', reading: cpu.value, color: '#62bdb0', sub: '' },
+  { label: 'GPU', reading: gpu.value, color: '#9bc26a', sub: gpu.value?.device?.replace('NVIDIA GeForce ', '') ?? '' },
+  { label: 'RAM', reading: ram.value, color: '#a396d6',
+    sub: ram.value?.usedGiB == null ? '' : `${ram.value.usedGiB} / ${ram.value.totalGiB} GiB` },
+])
+const heat = computed(() => [
+  { label: 'CPU', reading: sensors.value.find(sensor => sensor.sensor.startsWith('Package id')) },
+  { label: 'GPU', reading: sensors.value.find(sensor => sensor.sensor === 'GPU') },
+  { label: 'SSD', reading: sensors.value.find(sensor => sensor.device === 'nvme' && sensor.sensor === 'Composite') },
+].map(item => {
+  const degrees = item.reading?.value ?? null
+  const color = degrees === null ? 'var(--dim)' : degrees < 60 ? '#7cc79a' : degrees < 80 ? '#d8b56d' : '#df8b86'
+  return { ...item, degrees, color, fill: degrees === null ? 0 : Math.min(100, degrees) }
+}))
 const usageRows = computed(() => [
   { label: 'CPU', reading: cpu.value },
   { label: 'GPU', reading: gpu.value },
@@ -101,6 +119,7 @@ async function send(payload, secret) {
     if (controlKey.value === secret) {
       controlKey.value = ''
       localStorage.removeItem(DEVICE_KEY)
+      bridge?.clear()
     }
     throw new Error('Η εξουσιοδότηση έληξε ή ανακλήθηκε. Σάρωσε νέο QR.')
   }
@@ -131,6 +150,7 @@ async function pair(ticket) {
     if (!response.ok) throw new Error('Η σύζευξη δεν ολοκληρώθηκε. Βεβαιώσου ότι είσαι στο ίδιο Wi‑Fi.')
     const { token } = await response.json()
     localStorage.setItem(DEVICE_KEY, token)
+    bridge?.save(token)
     controlKey.value = token
     pairingMessage.value = 'Ο χειρισμός Spotify ενεργοποιήθηκε και αποθηκεύτηκε σε αυτή τη συσκευή.'
   } catch (error) {
@@ -150,6 +170,7 @@ async function disconnect() {
   try {
     await send({ action: 'revoke' }, controlKey.value)
     localStorage.removeItem(DEVICE_KEY)
+    bridge?.clear()
     controlKey.value = ''
     pairingMessage.value = 'Η εξουσιοδότηση αυτής της συσκευής ανακλήθηκε.'
   } catch (error) {
@@ -182,7 +203,8 @@ async function command(action, value) {
     </header>
 
     <div class="ubuntu-grid">
-      <article class="spotify-panel" aria-label="Spotify">
+      <article class="spotify-panel" aria-label="Spotify" :class="{ playing: player?.state === 'playing' }"
+               :style="player?.artwork ? { '--cover': `url(${JSON.stringify(player.artwork)})` } : {}">
         <div class="spotify-cover">
           <img v-if="player?.artwork" :src="player.artwork" referrerpolicy="no-referrer" alt="Εξώφυλλο κομματιού">
           <span v-else aria-hidden="true">♫</span>
@@ -199,7 +221,7 @@ async function command(action, value) {
                 <v-btn variant="text" @click="controlDialog = false">Κλείσιμο</v-btn>
               </div>
               <p v-if="linking" class="muted" role="status">Γίνεται σύζευξη…</p>
-              <p v-else-if="!controlKey">Άνοιξε το <strong>NEXUS Spotify QR</strong> στο Ubuntu και σάρωσε τον κωδικό από αυτή τη συσκευή.</p>
+              <p v-else-if="!controlKey">Σύζευξη χωρίς QR για το tablet: στο Ubuntu τρέξε <code>python3 -m backend.spotify_pairing --lenovo</code>. Για άλλη συσκευή σάρωσε το <strong>NEXUS Spotify QR</strong>.</p>
               <template v-else>
                 <p>Η συσκευή είναι εξουσιοδοτημένη.</p>
                 <v-btn variant="text" :disabled="runningAction" @click="disconnect">Αποσύνδεση συσκευής</v-btn>
@@ -238,20 +260,21 @@ async function command(action, value) {
       </article>
 
       <section class="hardware-list" aria-label="Μετρήσεις Ubuntu">
-        <dl class="hardware-lines">
-          <div v-for="row in usageRows" :key="row.label" class="hardware-line">
-            <dt>{{ row.label }}</dt><dd :class="{ 'measurement-missing': row.reading?.value == null }">{{ value(row.reading) }}</dd>
+        <div class="gauge-row">
+          <div v-for="gauge in gauges" :key="gauge.label" class="gauge-card">
+            <QuotaRing :percent="gauge.reading?.value ?? null" :color="gauge.color" :size="104" :stroke="9"
+                       :text="gauge.reading?.value == null ? '–' : Math.round(gauge.reading.value) + '%'" />
+            <strong>{{ gauge.label }}</strong>
+            <small>{{ gauge.reading?.value == null ? 'Μη διαθέσιμο' : (gauge.sub || ' ') }}</small>
           </div>
-          <div class="hardware-line">
-            <dt>Θερμοκρασίες</dt>
-            <dd class="temperature-values">
-              <span v-for="sensor in temperatures" :key="sensor.label">
-                <small>{{ sensor.label }}</small>
-                <b :class="{ 'measurement-missing': sensor.reading?.value == null }">{{ value(sensor.reading) }}</b>
-              </span>
-            </dd>
+        </div>
+        <div class="heat-row" aria-label="Θερμοκρασίες">
+          <div v-for="item in heat" :key="item.label" class="heat-card" :style="{ '--heat': item.color }">
+            <span class="heat-label">{{ item.label }}</span>
+            <b>{{ item.degrees === null ? 'Μη διαθέσιμο' : Math.round(item.degrees) + '°C' }}</b>
+            <i class="heat-bar" aria-hidden="true"><i :style="{ width: item.fill + '%' }"></i></i>
           </div>
-        </dl>
+        </div>
         <v-dialog v-model="metricsDialog" max-width="550" aria-labelledby="measurements-title">
           <template #activator="{ props: activator }">
             <v-btn v-bind="activator" variant="text" class="quiet-button">Λεπτομέρειες μετρήσεων</v-btn>

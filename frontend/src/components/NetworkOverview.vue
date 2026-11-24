@@ -1,5 +1,7 @@
 <script setup>
+import '../styles/network.css'
 import { computed, onUnmounted, ref, watch } from 'vue'
+import DeviceIcon from './DeviceIcon.vue'
 
 const props = defineProps({ active: Boolean })
 const snapshot = ref(null)
@@ -13,12 +15,15 @@ const saving = ref(false)
 const confirming = ref(false)
 const lastResponse = ref(null)
 const formError = ref('')
-const form = ref({ ip: '', name: '', kind: 'generic' })
+const form = ref({ ip: '', name: '', kind: 'generic', mac: undefined })
 let interval
 let pending
 
-const icons = { generic: '◈', tv: '▣', speaker: '◉', tablet: '▯', computer: '▰', phone: '▯' }
-const kinds = { generic: 'Συσκευή', tv: 'Τηλεόραση', speaker: 'Ηχείο', tablet: 'Tablet', computer: 'Υπολογιστής', phone: 'Τηλέφωνο' }
+const kinds = {
+  generic: 'Άγνωστος τύπος', router: 'Router', phone: 'Τηλέφωνο', tablet: 'Tablet', computer: 'Υπολογιστής', tv: 'Τηλεόραση',
+  speaker: 'Ηχείο', camera: 'Κάμερα', vacuum: 'Σκούπα-ρομπότ', printer: 'Εκτυπωτής', console: 'Κονσόλα', iot: 'Έξυπνη συσκευή',
+}
+const kindLabel = item => kinds[item.kind] + (item.guessed ? ' · εκτίμηση' : '')
 const dateFormat = new Intl.DateTimeFormat('el-GR', { timeZone: 'Europe/Athens', dateStyle: 'short', timeStyle: 'medium' })
 const dateTime = stamp => stamp ? dateFormat.format(new Date(stamp)) : 'Μη διαθέσιμο'
 const visibleDevices = computed(() => (snapshot.value?.devices ?? []).filter(device => !onlineOnly.value || device.available === true))
@@ -27,7 +32,7 @@ const checks = computed(() => [
   { name: 'Router', state: snapshot.value?.router, ok: 'Απαντά', unavailable: 'Δεν απαντά' },
   { name: 'Internet', state: snapshot.value?.internet, ok: 'Διαθέσιμο', unavailable: 'Χωρίς πρόσβαση' },
 ])
-const deviceState = item => item.available === true ? 'Εντοπίστηκε' : item.available === false ? 'Δεν απαντά' : 'Εκκρεμεί έλεγχος'
+const deviceState = item => item.available === true ? 'Συνδεδεμένη' : item.available === false ? 'Δεν απαντά' : 'Εκκρεμεί έλεγχος'
 
 async function refresh(force = false) {
   if ((!props.active && !force) || (loading.value && !force)) return
@@ -64,8 +69,10 @@ onUnmounted(() => { clearInterval(interval); pending?.abort() })
 function open(item) {
   confirming.value = false
   selected.value = item?.ip ?? ''
-  form.value = item ? { ip: item.ip, name: item.name, kind: item.kind } : { ip: '', name: '', kind: 'generic' }
-  editing.value = !item
+  form.value = item
+    ? { ip: item.ip, name: item.discovered ? '' : item.name, kind: item.kind, mac: item.mac }
+    : { ip: '', name: '', kind: 'generic', mac: undefined }
+  editing.value = !item || (item.discovered === true && !item.fixed)
   formError.value = ''
   detailsOpen.value = true
 }
@@ -109,27 +116,31 @@ async function removeDevice() {
 </script>
 
 <template>
-  <section class="network-page" aria-labelledby="network-title">
+  <section class="nw-page" aria-labelledby="network-title">
     <header class="view-heading">
       <div><h2 id="network-title" tabindex="-1">Δίκτυο</h2><p class="muted">Έλεγχος από το Lenovo · Ώρα Αθήνας</p></div>
     </header>
-    <article class="network-check backend-health">
-      <div>
-        <h3>Backend · Lenovo</h3>
-        <p>Τελευταία απόκριση · {{ dateTime(lastResponse) }}</p>
-      </div>
-      <strong class="network-state" role="status" :data-available="failed ? false : lastResponse ? true : null">
-        {{ failed ? 'Μη προσβάσιμο' : lastResponse ? 'Σε λειτουργία' : 'Εκκρεμεί έλεγχος' }}
-      </strong>
-    </article>
-    <div class="network-checks">
-      <article v-for="check in checks" :key="check.name" class="network-check">
-        <h3>{{ check.name }}</h3>
-        <strong class="network-state" :data-available="check.state?.available">
+    <div class="nw-checks">
+      <article class="nw-check nw-check-backend" :data-available="failed ? false : lastResponse ? true : null">
+        <span class="nw-dot" aria-hidden="true"></span>
+        <div class="nw-check-copy">
+          <h3>Backend · Lenovo</h3>
+          <p>Τελευταία απόκριση · {{ dateTime(lastResponse) }}</p>
+        </div>
+        <strong class="nw-state" role="status" :data-available="failed ? false : lastResponse ? true : null">
+          {{ failed ? 'Μη προσβάσιμο' : lastResponse ? 'Σε λειτουργία' : 'Εκκρεμεί έλεγχος' }}
+        </strong>
+      </article>
+      <article v-for="check in checks" :key="check.name" class="nw-check" :data-available="check.state?.available">
+        <span class="nw-dot" aria-hidden="true"></span>
+        <div class="nw-check-copy">
+          <h3>{{ check.name }}</h3>
+          <p>Τελευταίος έλεγχος · {{ dateTime(check.state?.checkedAt) }}</p>
+          <p v-if="check.state?.available === false">Τελευταία επιτυχία · {{ dateTime(check.state.lastSuccess) }}</p>
+        </div>
+        <strong class="nw-state" :data-available="check.state?.available">
           {{ check.state?.available === true ? check.ok : check.state?.available === false ? check.unavailable : 'Εκκρεμεί έλεγχος' }}
         </strong>
-        <p>Τελευταίος έλεγχος · {{ dateTime(check.state?.checkedAt) }}</p>
-        <p v-if="check.state?.available === false">Τελευταία επιτυχία · {{ dateTime(check.state.lastSuccess) }}</p>
       </article>
     </div>
     <p v-if="snapshot?.router.available && snapshot?.internet.available === false" class="notice" role="status">
@@ -137,22 +148,23 @@ async function removeDevice() {
     </p>
     <p v-if="failed" class="notice" role="status">Το Lenovo δεν έστειλε νεότερα δεδομένα. Εμφανίζονται οι τελευταίες λήψεις.</p>
 
-    <section aria-labelledby="known-title" class="known-devices">
-      <div class="known-heading">
+    <section aria-labelledby="known-title" class="nw-known">
+      <div class="nw-known-head">
         <div>
-          <h3 id="known-title">Γνωστές συσκευές</h3>
-          <p class="muted">Έλεγχος δηλωμένων IP μέσω ping και τοπικής παρουσίας.</p>
+          <h3 id="known-title">Συσκευές στο δίκτυο</h3>
+          <p class="muted">Εντοπίζονται αυτόματα (ping και ARP στο τοπικό δίκτυο). Πάτα μια συσκευή για να της δώσεις όνομα.</p>
         </div>
         <v-btn color="primary" :disabled="!snapshot" @click="open()">Προσθήκη συσκευής</v-btn>
       </div>
-      <label class="network-filter"><input v-model="onlineOnly" type="checkbox"> Μόνο όσες εντοπίστηκαν</label>
+      <label class="nw-filter"><input v-model="onlineOnly" type="checkbox"> Μόνο όσες εντοπίστηκαν</label>
       <p v-if="!visibleDevices.length" class="muted">{{ snapshot ? 'Δεν υπάρχουν συσκευές για αυτό το φίλτρο.' : 'Αναμονή για τον πρώτο έλεγχο.' }}</p>
-      <div v-else class="network-devices">
-        <button v-for="item in visibleDevices" :key="item.ip" type="button" class="network-device" @click="open(item)">
-          <span class="network-device-icon" aria-hidden="true">{{ icons[item.kind] ?? icons.generic }}</span>
-          <span class="network-device-copy">
+      <div v-else class="nw-devices">
+        <button v-for="item in visibleDevices" :key="item.ip" type="button" class="nw-device" @click="open(item)">
+          <span class="nw-device-icon" aria-hidden="true"><DeviceIcon :kind="item.kind" /></span>
+          <span class="nw-device-copy">
             <strong>{{ item.name }}</strong>
-            <small class="network-state" :data-available="item.available">{{ deviceState(item) }}</small>
+            <small class="nw-kind">{{ kindLabel(item) }}</small>
+            <small class="nw-state" :data-available="item.available">{{ deviceState(item) }}<template v-if="item.discovered"> · νέα</template></small>
           </span>
         </button>
       </div>
@@ -161,10 +173,10 @@ async function removeDevice() {
     <v-dialog v-model="detailsOpen" max-width="430" aria-labelledby="network-dialog-title">
       <v-card class="dialog-panel">
         <div class="dialog-heading">
-          <h2 id="network-dialog-title">{{ device?.name ?? 'Προσθήκη συσκευής' }}</h2>
+          <h2 id="network-dialog-title">{{ device && !editing ? device.name : device ? 'Όνομα συσκευής' : 'Προσθήκη συσκευής' }}</h2>
           <v-btn variant="text" @click="detailsOpen = false">Κλείσιμο</v-btn>
         </div>
-        <form v-if="editing" class="network-form" @submit.prevent="save">
+        <form v-if="editing" class="nw-form" @submit.prevent="save">
           <label>Όνομα<input v-model.trim="form.name" required maxlength="60" placeholder="π.χ. Τηλεόραση σαλονιού"></label>
           <label>Διεύθυνση IPv4<input v-model.trim="form.ip" :readonly="!!selected" required inputmode="decimal" placeholder="192.168.1.x"></label>
           <label>Τύπος
@@ -175,17 +187,19 @@ async function removeDevice() {
         </form>
         <template v-else-if="device">
           <dl class="detail-list">
+            <div><dt>Τύπος</dt><dd>{{ kindLabel(device) }}</dd></div>
             <div><dt>Κατάσταση</dt><dd>{{ deviceState(device) }}</dd></div>
             <div><dt>IP</dt><dd>{{ device.ip }}</dd></div>
+            <div v-if="device.mac"><dt>MAC</dt><dd>{{ device.mac }}</dd></div>
             <div><dt>Τελευταία εμφάνιση</dt><dd>{{ dateTime(device.lastSeen) }}</dd></div>
             <div><dt>Σύνδεση</dt><dd>{{ device.connection ?? 'Μη διαθέσιμο από το router' }}</dd></div>
           </dl>
-          <div v-if="confirming" class="network-dialog-actions">
+          <div v-if="confirming" class="nw-dialog-actions">
             <p>Να αφαιρεθεί από τις γνωστές συσκευές;</p>
             <v-btn variant="text" :disabled="saving" @click="confirming = false">Ακύρωση</v-btn>
             <v-btn color="error" :loading="saving" @click="removeDevice">Επιβεβαίωση διαγραφής</v-btn>
           </div>
-          <div v-else class="network-dialog-actions">
+          <div v-else-if="!device.fixed" class="nw-dialog-actions">
             <v-btn variant="tonal" @click="editing = true">Αλλαγή ονόματος</v-btn>
             <v-btn color="error" variant="text" @click="confirming = true">Διαγραφή</v-btn>
           </div>
