@@ -9,6 +9,7 @@ from threading import Thread
 from urllib.parse import parse_qs, urlsplit
 
 from .activity import collect_draft
+from .lenovo_address import dashboard_base
 from .limits import ATHENS, limit_samples
 from .scheduled import available_days, read_draft
 from .spotify_pairing import device_grant, redeem
@@ -24,7 +25,7 @@ def week_data(start):
         result = {"date": day.isoformat(), "state": "unchecked", "projects": [], "unavailable": []}
         if day <= now:
             try:
-                data = collect_draft(day, PROJECT_ROOT)
+                data = collect_draft(day, PROJECT_ROOT, "cached")
             except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
                 days.append(result)
                 continue
@@ -63,7 +64,7 @@ class CollectorHandler(BaseHTTPRequestHandler):
                 self.send_error(400)
                 return
             try:
-                draft = read_draft(day) if request.path == "/scheduled/draft" else collect_draft(day, PROJECT_ROOT)
+                draft = read_draft(day) if request.path == "/scheduled/draft" else collect_draft(day, PROJECT_ROOT, True)
             except FileNotFoundError:
                 self.send_error(404)
                 return
@@ -118,9 +119,8 @@ class CollectorHandler(BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--legacy-bind", default="192.168.1.138")
-    parser.add_argument("--dashboard-url", default="http://192.168.1.238:18767")
+    parser.add_argument("--dashboard-url", help="Fixed dashboard URL; by default the tablet is asked over ADB.")
     args = parser.parse_args()
-    dashboard_url = args.dashboard_url.rstrip("/")
 
     class RedirectHandler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -128,7 +128,7 @@ def main():
                 self.send_error(404)
                 return
             self.send_response(302)
-            self.send_header("Location", dashboard_url + "/")
+            self.send_header("Location", (args.dashboard_url.rstrip("/") if args.dashboard_url else dashboard_base()) + "/")
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
 

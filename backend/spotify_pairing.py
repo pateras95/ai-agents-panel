@@ -12,6 +12,8 @@ from threading import Lock
 import time
 import webbrowser
 
+from .lenovo_address import dashboard_base
+
 
 STATE = Path(os.environ.get("NEXUS_SPOTIFY_PAIR_STATE")
              or Path.home() / ".local/state/nexus-ai/spotify-pairing")
@@ -43,7 +45,7 @@ def pairing_link():
                 item.unlink(missing_ok=True)
         except FileNotFoundError:
             continue
-    return "http://192.168.1.238:18767/#spotify-pair=" + issue("tickets")
+    return dashboard_base() + "/#spotify-pair=" + issue("tickets")
 
 
 def redeem(token):
@@ -99,11 +101,27 @@ a{{display:inline-block;padding:.8rem 1rem;background:#ff8299;color:#241018;
         print(path)
 
 
+def pair_lenovo():
+    """Hand a single-use ticket to the NEXUS Dashboard app on the USB-connected Lenovo tablet."""
+    import subprocess
+
+    ticket = pairing_link().rsplit("=", 1)[1]
+    result = subprocess.run(
+        ["/usr/bin/adb", "-d", "shell", "am", "start", "-n",
+         "org.nexusai.panel.dashboard/org.nexusai.panel.MainActivity",
+         "--es", "nexus_spotify_pair", ticket],
+        capture_output=True, text=True, timeout=15)
+    print("Έγινε σύζευξη του Lenovo." if result.returncode == 0 else "Το Lenovo δεν είναι συνδεδεμένο μέσω USB.")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--lenovo", action="store_true", help="Pair the USB-connected Lenovo tablet without a QR code.")
     parser.add_argument("--link", action="store_true", help="Print a single-use pairing link.")
     args = parser.parse_args()
-    if args.link:
+    if args.lenovo:
+        pair_lenovo()
+    elif args.link:
         print(pairing_link())
     else:
         show_qr()

@@ -61,6 +61,8 @@ def capture_claude():
                 "resets_at": reset if timestamp(reset) is not None else None,
             }
 
+    if not windows:
+        return  # keep the last good reading when this refresh carries no rate limits
     CACHE.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
     with tempfile.NamedTemporaryFile(
         mode="w", encoding="utf-8", dir=CACHE.parent, delete=False
@@ -72,6 +74,12 @@ def capture_claude():
             temporary_path.replace(CACHE)
         finally:
             temporary_path.unlink(missing_ok=True)
+    parts = []
+    for label, key, _ in WINDOWS:
+        used = used_percent(windows.get(key, {}).get("used_percentage"))
+        if used is not None:
+            parts.append(f"{label} {100 - used:g}%")
+    print("NEXUS · " + " · ".join(parts))
 
 
 def start_claude_session():

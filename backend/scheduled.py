@@ -35,7 +35,7 @@ def main():
     now = datetime.now(ATHENS)
     day = latest_workday(now)
     root = Path(__file__).resolve().parents[1]
-    draft = collect_draft(day, root)
+    draft = collect_draft(day, root, True)
     draft["generatedAt"] = datetime.now(ATHENS).isoformat(timespec="seconds")
     if len(draft["unavailable"]) and not draft["projects"]:
         raise SystemExit("The approved Git repositories were unavailable.")

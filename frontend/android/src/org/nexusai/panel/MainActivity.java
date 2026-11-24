@@ -2,6 +2,7 @@ package org.nexusai.panel;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
@@ -9,6 +10,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebView;
@@ -22,7 +24,11 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
 import java.net.URL;
+import java.util.Collections;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
@@ -30,9 +36,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
-    private static final String HOST = "192.168.1.238";
     private static final int PORT = 18767;
-    private static final String BASE_URL = "http://" + HOST + ":" + PORT;
     private static final int BACKGROUND = Color.rgb(18, 15, 20);
     private static final int FOREGROUND = Color.rgb(246, 238, 241);
     private static final int ONLINE = Color.rgb(148, 225, 202);
@@ -48,6 +52,24 @@ public final class MainActivity extends Activity {
             handler.postDelayed(this, 5000);
         }
     };
+    /** Keeps the Spotify device grant in the app, so it survives a change of the tablet's Wi-Fi address. */
+    private final class DeviceStore {
+        private final SharedPreferences prefs = getSharedPreferences("device", MODE_PRIVATE);
+
+        @JavascriptInterface public String load() {
+            return prefs.getString("spotify", "");
+        }
+
+        @JavascriptInterface public void save(String token) {
+            if (token != null && token.matches("[A-Za-z0-9_-]{43}")) prefs.edit().putString("spotify", token).apply();
+        }
+
+        @JavascriptInterface public void clear() {
+            prefs.edit().remove("spotify").apply();
+        }
+    }
+
+    private String host;
     private boolean statusApp;
     private boolean foreground;
     private WebView web;
@@ -66,7 +88,7 @@ public final class MainActivity extends Activity {
         super.onNewIntent(intent);
         setIntent(intent);
         String path = pairingPath(intent);
-        if (!statusApp && !"/".equals(path) && web != null) web.loadUrl(BASE_URL + path);
+        if (!statusApp && !"/".equals(path) && web != null && host != null) web.loadUrl(baseUrl() + path);
     }
 
     private String pairingPath(Intent intent) {
@@ -81,10 +103,29 @@ public final class MainActivity extends Activity {
         if (focused) fullscreen();
     }
 
+    // The server listens on this tablet's own Wi-Fi address, which DHCP may change.
+    private static String wifiHost() {
+        try {
+            for (NetworkInterface network : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (!"wlan0".equals(network.getName())) continue;
+                for (InetAddress address : Collections.list(network.getInetAddresses())) {
+                    if (address instanceof Inet4Address) return address.getHostAddress();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private String baseUrl() {
+        return "http://" + host + ":" + PORT;
+    }
+
     @Override protected void onResume() {
         super.onResume();
         foreground = true;
         if (statusApp) handler.post(poll);
+        else if (web == null || host == null || !host.equals(wifiHost())) showDashboard("/");
     }
 
     @Override protected void onPause() {
@@ -109,17 +150,32 @@ public final class MainActivity extends Activity {
     }
 
     private void showDashboard(String path) {
-        if (web != null) web.destroy();
+        handler.removeCallbacksAndMessages(null);
+        if (web != null) {
+            web.destroy();
+            web = null;
+        }
+        host = wifiHost();
+        if (host == null) {
+            LinearLayout panel = panel();
+            label(panel, "NEXUS AI · Dashboard", 30, FOREGROUND);
+            label(panel, "Αναμονή για σύνδεση Wi‑Fi…", 19, OFFLINE);
+            setContentView(panel);
+            handler.postDelayed(() -> showDashboard(path), 3000);
+            return;
+        }
+        final String currentHost = host;
         web = new WebView(this);
         web.setBackgroundColor(BACKGROUND);
         web.getSettings().setJavaScriptEnabled(true);
         web.getSettings().setDomStorageEnabled(true);
         web.getSettings().setAllowFileAccess(false);
         web.getSettings().setAllowContentAccess(false);
+        web.addJavascriptInterface(new DeviceStore(), "NexusDevice");
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri url = request.getUrl();
-                return !("http".equals(url.getScheme()) && HOST.equals(url.getHost()) && url.getPort() == PORT);
+                return !("http".equals(url.getScheme()) && currentHost.equals(url.getHost()) && url.getPort() == PORT);
             }
 
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
@@ -132,11 +188,12 @@ public final class MainActivity extends Activity {
                     retry.setOnClickListener(v -> showDashboard(path));
                     panel.addView(retry);
                     setContentView(panel);
+                    handler.postDelayed(() -> showDashboard(path), 5000);
                 }
             }
         });
         setContentView(web);
-        web.loadUrl(BASE_URL + path);
+        web.loadUrl(baseUrl() + path);
     }
 
     private LinearLayout panel() {
@@ -170,10 +227,13 @@ public final class MainActivity extends Activity {
     }
 
     private void refreshStatus() {
+        host = wifiHost();
+        final String target = host;
         executor.execute(() -> {
             HttpURLConnection connection = null;
             try {
-                connection = (HttpURLConnection) new URL(BASE_URL + "/api/status").openConnection();
+                if (target == null) throw new IllegalStateException("No Wi-Fi");
+                connection = (HttpURLConnection) new URL("http://" + target + ":" + PORT + "/api/status").openConnection();
                 connection.setConnectTimeout(1800);
                 connection.setReadTimeout(2500);
                 connection.setInstanceFollowRedirects(false);

@@ -24,7 +24,7 @@ for variant in backend dashboard; do
     if [[ "$variant" == dashboard ]]; then label="NEXUS Dashboard"; fi
     cat > "$work/AndroidManifest.xml" <<XML
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="org.nexusai.panel.$variant" android:versionCode="2" android:versionName="1.1">
+    package="org.nexusai.panel.$variant" android:versionCode="4" android:versionName="1.3">
     <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="29" />
     <uses-permission android:name="android.permission.INTERNET" />
     <application android:allowBackup="false" android:usesCleartextTraffic="true"
