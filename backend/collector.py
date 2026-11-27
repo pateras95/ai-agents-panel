@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import subprocess
+import time
 from threading import Thread
 from urllib.parse import parse_qs, urlsplit
 
@@ -134,12 +135,17 @@ def main():
             self.end_headers()
 
     with ThreadingHTTPServer(("127.0.0.1", 18769), CollectorHandler) as collector:
-        try:
-            legacy = ThreadingHTTPServer((args.legacy_bind, 8766), RedirectHandler)
-        except OSError:
-            legacy = None  # the redirect address belongs to the Ubuntu network card; skip it elsewhere
-        if legacy is not None:
-            Thread(target=legacy.serve_forever, daemon=True).start()
+        def serve_legacy():
+            # The address belongs to the Ubuntu network card, which may not be up yet at boot; keep retrying.
+            while True:
+                try:
+                    legacy = ThreadingHTTPServer((args.legacy_bind, 8766), RedirectHandler)
+                except OSError:
+                    time.sleep(10)
+                    continue
+                legacy.serve_forever()
+
+        Thread(target=serve_legacy, daemon=True).start()
         collector.serve_forever()
 
 
