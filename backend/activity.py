@@ -29,10 +29,39 @@ def load_projects():
         return {}
 
 
-_LOADED = load_projects()
-PROJECTS = {slug: name for slug, (name, _) in _LOADED.items()}
-CATEGORIES = {name: category for name, category in _LOADED.values()}
 ROOT = Path("/var/www/html")
+PROJECTS, CATEGORIES = {}, {}
+
+
+def discover_projects():
+    """Git repositories that appeared under the repositories root since the file was written.
+
+    The user approved the whole root, so a new checkout is picked up automatically. Its name is
+    derived from the folder and it is treated as "mpass" (the stricter policy) until the local
+    file says otherwise.
+    """
+    found = {}
+    try:
+        folders = sorted(ROOT.iterdir())
+    except OSError:
+        return found
+    for folder in folders:
+        if (re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", folder.name) and not folder.is_symlink()
+                and (folder / ".git").exists()):
+            found[folder.name] = (folder.name.replace("-", " ").replace("_", " ").title(), "mpass")
+    return found
+
+
+def refresh_projects():
+    """Reload the approved list and add newly discovered repositories (the file wins)."""
+    loaded = {**discover_projects(), **load_projects()}
+    PROJECTS.clear()
+    PROJECTS.update({slug: name for slug, (name, _) in loaded.items()})
+    CATEGORIES.clear()
+    CATEGORIES.update({name: category for name, category in loaded.values()})
+
+
+refresh_projects()
 
 
 def git(repo, *args, okay=(0,)):
@@ -159,6 +188,7 @@ def summarize(commits):
 
 
 def collect_draft(day, project_root, humanized=False):
+    refresh_projects()
     start = datetime.combine(day, time.min, ATHENS).timestamp()
     end = datetime.combine(day + timedelta(days=1), time.min, ATHENS).timestamp()
     projects, unavailable = [], []
